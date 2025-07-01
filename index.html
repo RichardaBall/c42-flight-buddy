@@ -61,9 +61,10 @@
 
       const startTime = new Date(startInput + "Z"); // parse as GMT
       const now = new Date();
+      const maxForecastTime = new Date(now.getTime() + 5 * 24 * 60 * 60 * 1000); // now + 5 days
 
-      if (startTime <= now) {
-        resDiv.innerHTML = '<p class="bad">Please enter a valid start time and duration.</p>';
+      if (startTime <= now || startTime > maxForecastTime) {
+        resDiv.innerHTML = '<p class="bad">Please enter a valid start time and duration within the next 5 days.</p>';
         return;
       }
 
