@@ -1,138 +1,93 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>C42 Flight Buddy</title>
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      max-width: 600px;
-      margin: auto;
-      padding: 20px;
-      background: #f5f5f5;
-      color: #333;
+<script>
+  const LAT = 51.605;
+  const LON = -4.064;
+  const API_KEY = '81a0d8bef1288c6437560f89b336dd33';
+  const elevation = 295; // meters
+
+  async function checkFlight() {
+    const startInput = document.getElementById("start").value;
+    const duration = parseFloat(document.getElementById("duration").value);
+    const resDiv = document.getElementById("results");
+
+    if (!startInput || isNaN(duration) || duration <= 0) {
+      resDiv.innerHTML = '<p class="bad">Please enter a valid start time and duration.</p>';
+      return;
     }
-    input, button {
-      padding: 10px;
-      margin: 5px 0;
-      width: 100%;
-      font-size: 1rem;
+
+    const startTime = new Date(startInput);
+    const now = new Date();
+
+    if (startTime < now) {
+      resDiv.innerHTML = '<p class="bad">Please enter a valid start time and duration.</p>';
+      return;
     }
-    #results {
-      margin-top: 20px;
-      padding: 15px;
-      background: #fff;
-      border-radius: 5px;
-    }
-    .ok { color: green; }
-    .bad { color: red; }
-  </style>
-</head>
-<body>
-  <h1>C42 Flight Buddy</h1>
-  <p>Check flight weather from Swansea Airport</p>
 
-  <label for="start">Flight start (UTC):</label>
-  <input type="datetime-local" id="start"/>
+    const diffMs = startTime - now;
 
-  <label for="duration">Flight duration (hours):</label>
-  <input type="number" id="duration" min="0.5" step="0.5" value="1"/>
+    resDiv.innerHTML = '<p>Loading weather data...</p>';
 
-  <button onclick="checkFlight()">Check Flight</button>
+    try {
+      let weatherData;
 
-  <div id="results"></div>
+      if (diffMs > 3 * 60 * 60 * 1000) {
+        const resp = await fetch(`https://api.openweathermap.org/data/2.5/forecast?lat=${LAT}&lon=${LON}&appid=${API_KEY}&units=metric`);
+        const data = await resp.json();
 
-  <script>
-    const LAT = 51.605;
-    const LON = -4.064;
-    const API_KEY = '81a0d8bef1288c6437560f89b336dd33';
-    const elevation = 295; // meters
+        weatherData = data.list.reduce((closest, curr) => {
+          const currTime = new Date(curr.dt * 1000);
+          return Math.abs(currTime - startTime) < Math.abs(new Date(closest.dt * 1000) - startTime) ? curr : closest;
+        });
 
-    async function checkFlight() {
-      const startInput = document.getElementById("start").value;
-      const duration = parseFloat(document.getElementById("duration").value);
-      const resDiv = document.getElementById("results");
-
-      if (!startInput || isNaN(duration) || duration <= 0) {
-        resDiv.innerHTML = '<p class="bad">Please enter a valid start time and duration.</p>';
-        return;
+      } else {
+        const resp = await fetch(`https://api.openweathermap.org/data/2.5/weather?lat=${LAT}&lon=${LON}&appid=${API_KEY}&units=metric`);
+        weatherData = await resp.json();
       }
 
-      const startTime = new Date(startInput);
-      const now = new Date();
-      const diffMs = startTime - now;
+      const main = weatherData.main || {};
+      const wind = weatherData.wind || {};
+      const weatherArr = weatherData.weather || [];
+      const pressure = main.pressure || 0;
+      const windDeg = wind.deg || 0;
+      const windSpeed = wind.speed || 0;
+      const visibility = weatherData.visibility !== undefined ? weatherData.visibility : 10000;
+      const weatherDesc = weatherArr.length ? weatherArr[0].description : "unknown";
 
-      resDiv.innerHTML = '<p>Loading weather data...</p>';
+      const QFE = (pressure - (elevation * 0.12)).toFixed(1);
+      const windKts = (windSpeed * 1.94384).toFixed(1);
 
-      try {
-        let weatherData;
+      const runway = predictRunway(windDeg);
+      const safe = checkLimits(windKts, visibility, weatherDesc);
 
-        if (diffMs > 3 * 60 * 60 * 1000) {
-          // Use forecast API
-          const resp = await fetch(`https://api.openweathermap.org/data/2.5/forecast?lat=${LAT}&lon=${LON}&appid=${API_KEY}&units=metric`);
-          const data = await resp.json();
+      resDiv.innerHTML = `
+        <h3>Results for ${startTime.toUTCString()}</h3>
+        <p><strong>QNH:</strong> ${pressure} hPa</p>
+        <p><strong>QFE:</strong> ${QFE} hPa</p>
+        <p><strong>Wind:</strong> ${windDeg}&deg; @ ${windKts} kt</p>
+        <p><strong>Visibility:</strong> ${visibility} m</p>
+        <p><strong>Weather:</strong> ${weatherDesc}</p>
+        <p><strong>Predicted Runway:</strong> ${runway}</p>
+        <p class="${safe.safe ? 'ok' : 'bad'}"><strong>${safe.msg}</strong></p>
+      `;
 
-          // Find closest forecast to startTime
-          weatherData = data.list.reduce((closest, curr) => {
-            const currTime = new Date(curr.dt * 1000);
-            return Math.abs(currTime - startTime) < Math.abs(new Date(closest.dt * 1000) - startTime) ? curr : closest;
-          });
-
-        } else {
-          // Use current weather API
-          const resp = await fetch(`https://api.openweathermap.org/data/2.5/weather?lat=${LAT}&lon=${LON}&appid=${API_KEY}&units=metric`);
-          weatherData = await resp.json();
-        }
-
-        // Extract data depending on forecast or current API response format
-        const main = weatherData.main || {};
-        const wind = weatherData.wind || {};
-        const weatherArr = weatherData.weather || [];
-        const pressure = main.pressure || 0;
-        const windDeg = wind.deg || 0;
-        const windSpeed = wind.speed || 0;
-        const visibility = weatherData.visibility !== undefined ? weatherData.visibility : 10000; // forecast API has no visibility, assume 10km
-        const weatherDesc = weatherArr.length ? weatherArr[0].description : "unknown";
-
-        const QFE = (pressure - (elevation * 0.12)).toFixed(1);
-        const windKts = (windSpeed * 1.94384).toFixed(1);
-
-        const runway = predictRunway(windDeg);
-        const safe = checkLimits(windKts, visibility, weatherDesc);
-
-        resDiv.innerHTML = `
-          <h3>Results for ${startTime.toUTCString()}</h3>
-          <p><strong>QNH:</strong> ${pressure} hPa</p>
-          <p><strong>QFE:</strong> ${QFE} hPa</p>
-          <p><strong>Wind:</strong> ${windDeg}&deg; @ ${windKts} kt</p>
-          <p><strong>Visibility:</strong> ${visibility} m</p>
-          <p><strong>Weather:</strong> ${weatherDesc}</p>
-          <p><strong>Predicted Runway:</strong> ${runway}</p>
-          <p class="${safe.safe ? 'ok' : 'bad'}"><strong>${safe.msg}</strong></p>
-        `;
-
-      } catch (e) {
-        resDiv.innerHTML = '<p class="bad">Error fetching weather data.</p>';
-      }
+    } catch (e) {
+      resDiv.innerHTML = '<p class="bad">Error fetching weather data.</p>';
     }
+  }
 
-    function predictRunway(windDir) {
-      const runways = { '04': 40, '22': 220, '10': 100, '28': 280 };
-      let best = Object.entries(runways).reduce((a, b) => {
-        const aDiff = Math.min(Math.abs(a[1] - windDir), 360 - Math.abs(a[1] - windDir));
-        const bDiff = Math.min(Math.abs(b[1] - windDir), 360 - Math.abs(b[1] - windDir));
-        return aDiff < bDiff ? a : b;
-      });
-      return best[0];
-    }
+  function predictRunway(windDir) {
+    const runways = { '04': 40, '22': 220, '10': 100, '28': 280 };
+    let best = Object.entries(runways).reduce((a, b) => {
+      const aDiff = Math.min(Math.abs(a[1] - windDir), 360 - Math.abs(a[1] - windDir));
+      const bDiff = Math.min(Math.abs(b[1] - windDir), 360 - Math.abs(b[1] - windDir));
+      return aDiff < bDiff ? a : b;
+    });
+    return best[0];
+  }
 
-    function checkLimits(wind, vis, desc) {
-      if (parseFloat(wind) > 20) return { safe: false, msg: "❌ Wind exceeds C42 limits" };
-      if (vis < 5000) return { safe: false, msg: "❌ Visibility too low for C42" };
-      if (desc.toLowerCase().includes("rain")) return { safe: false, msg: "❌ Rain not suitable for C42" };
-      return { safe: true, msg: "✅ Weather suitable for C42 flight" };
-    }
-  </script>
-</body>
-</html>
+  function checkLimits(wind, vis, desc) {
+    if (parseFloat(wind) > 20) return { safe: false, msg: "❌ Wind exceeds C42 limits" };
+    if (vis < 5000) return { safe: false, msg: "❌ Visibility too low for C42" };
+    if (desc.toLowerCase().includes("rain")) return { safe: false, msg: "❌ Rain not suitable for C42" };
+    return { safe: true, msg: "✅ Weather suitable for C42 flight" };
+  }
+</script>
