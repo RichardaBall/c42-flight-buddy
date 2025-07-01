@@ -31,9 +31,9 @@
 </style>
 </head>
 <body>
-<!-- C42 Flight Buddy version: 2025-07-01-01 -->
+<!-- C42 Flight Buddy version: 2025-07-01-02 -->
 <h1>C42 Flight Buddy</h1>
-<p><em>Version: 2025-07-01-01</em></p>
+<p><em>Version: 2025-07-01-02</em></p>
 <p>Check flight weather from Swansea Airport</p>
 
 <label for="start">Flight start (GMT):</label>
@@ -67,7 +67,11 @@ async function checkFlight() {
   const maxForecastTime = new Date(now.getTime() + 5 * 24 * 60 * 60 * 1000); // now + 5 days
   const endTime = new Date(startTime.getTime() + duration * 3600 * 1000);
 
-  if (startTime <= now || startTime > maxForecastTime) {
+  if (startTime <= now) {
+    resDiv.innerHTML = '<p class="bad">Please enter a valid start time and duration within the next 5 days.</p>';
+    return;
+  }
+  if (startTime > maxForecastTime) {
     resDiv.innerHTML = '<p class="bad">Please enter a valid start time and duration within the next 5 days.</p>';
     return;
   }
@@ -82,17 +86,20 @@ async function checkFlight() {
     const forecastResp = await fetch(`https://api.openweathermap.org/data/2.5/forecast?lat=${LAT}&lon=${LON}&appid=${API_KEY}&units=metric`);
     const forecastData = await forecastResp.json();
 
-    // Filter forecast points where forecast window overlaps flight window:
-    // forecast start <= flight end && forecast end >= flight start
-    const relevantForecasts = forecastData.list.filter(item => {
+    // Filter forecasts that start at or after flight start and before flight end
+    let relevantForecasts = forecastData.list.filter(item => {
       const forecastStart = new Date(item.dt * 1000);
-      const forecastEnd = new Date(forecastStart.getTime() + 3 * 3600 * 1000);
-      return (forecastStart <= endTime) && (forecastEnd >= startTime);
+      return forecastStart >= startTime && forecastStart <= endTime;
     });
 
+    // If none found, get closest forecast (before or after)
     if (relevantForecasts.length === 0) {
-      resDiv.innerHTML = '<p class="bad">No forecast data available for selected flight window.</p>';
-      return;
+      const closest = forecastData.list.reduce((prev, curr) => {
+        const prevDiff = Math.abs(new Date(prev.dt * 1000) - startTime);
+        const currDiff = Math.abs(new Date(curr.dt * 1000) - startTime);
+        return currDiff < prevDiff ? curr : prev;
+      });
+      relevantForecasts.push(closest);
     }
 
     let issues = [];
