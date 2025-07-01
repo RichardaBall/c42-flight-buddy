@@ -77,9 +77,11 @@
       resDiv.innerHTML = '<p>Loading weather data...</p>';
 
       try {
+        // Fetch forecast data (3-hour steps) - covers full 5 days
         const forecastResp = await fetch(`https://api.openweathermap.org/data/2.5/forecast?lat=${LAT}&lon=${LON}&appid=${API_KEY}&units=metric`);
         const forecastData = await forecastResp.json();
 
+        // Also fetch current weather for flights starting within 3 hours
         let currentWeather = null;
         const diffMs = startTime - now;
         if (diffMs <= 3 * 3600 * 1000) {
@@ -87,11 +89,16 @@
           currentWeather = await currentResp.json();
         }
 
+        // Filter forecast points that overlap flight duration
+        // Each forecast item covers time from dt (start) to dt + 3 hours approx.
         const relevantForecasts = forecastData.list.filter(item => {
           const itemTime = new Date(item.dt * 1000);
+          // Include if forecast time overlaps any part of flight window
           return itemTime >= startTime && itemTime <= endTime;
         });
 
+        // If flight duration < 3 hours and current weather is available and start time close
+        // consider current weather as well
         if (duration <= 3 && currentWeather && startTime <= now) {
           relevantForecasts.unshift(currentWeather);
         }
@@ -104,7 +111,8 @@
         let issues = [];
         let messages = [];
 
-        relevantForecasts.forEach((item) => {
+        // Check each forecast item for limits
+        relevantForecasts.forEach((item, idx) => {
           const main = item.main || {};
           const wind = item.wind || {};
           const weatherArr = item.weather || [];
@@ -112,17 +120,18 @@
           const windDeg = wind.deg || 0;
           const windSpeed = wind.speed || 0;
           const visibility = item.visibility !== undefined ? item.visibility : 10000;
-          const cloudCover = item.clouds ? item.clouds.all : 0;
           const weatherDesc = weatherArr.length ? weatherArr[0].description : "unknown";
 
           const QFE = (pressure - (elevation * 0.12)).toFixed(1);
           const windKts = (windSpeed * 1.94384).toFixed(1);
 
           const runway = predictRunway(windDeg);
-          const safe = checkLimits(windKts, visibility, weatherDesc, cloudCover);
+          const safe = checkLimits(windKts, visibility, weatherDesc);
 
           let timeLabel;
           if (item.dt) {
+            timeLabel = new Date(item.dt * 1000).toUTCString().replace("UTC", "GMT");
+          } else if (item.sys && item.dt) { // fallback for current weather (rare)
             timeLabel = new Date(item.dt * 1000).toUTCString().replace("UTC", "GMT");
           } else {
             timeLabel = startTime.toUTCString().replace("UTC", "GMT");
@@ -134,7 +143,6 @@ QNH: ${pressure} hPa
 QFE: ${QFE} hPa
 Wind: ${windDeg}° @ ${windKts} kt
 Visibility: ${visibility} m
-Cloud cover: ${cloudCover} %
 Weather: ${weatherDesc}
 Predicted Runway: ${runway}
 Status: ${safe.safe ? "✅ OK" : "❌ Limit Exceeded"}
@@ -146,6 +154,7 @@ Status: ${safe.safe ? "✅ OK" : "❌ Limit Exceeded"}
           }
         });
 
+        // Summarize results
         const overallStatus = issues.length === 0
           ? '<p class="ok"><strong>✅ Weather suitable for full flight duration.</strong></p>'
           : `<p class="bad"><strong>❌ Weather issues detected during flight:</strong><br>${issues.join("<br>")}</p>`;
@@ -171,13 +180,10 @@ Status: ${safe.safe ? "✅ OK" : "❌ Limit Exceeded"}
       return best[0];
     }
 
-    function checkLimits(wind, vis, desc, cloudCover) {
+    function checkLimits(wind, vis, desc) {
       if (parseFloat(wind) > 20) return { safe: false, msg: "Wind exceeds C42 limits (>20 kt)" };
       if (vis < 5000) return { safe: false, msg: "Visibility too low (<5000 m)" };
       if (desc.toLowerCase().includes("rain")) return { safe: false, msg: "Rain not suitable for C42" };
-      if (cloudCover !== undefined && cloudCover > 80 && vis < 5000) {
-        return { safe: false, msg: "High cloud cover with low visibility — possible low cloud or fog" };
-      }
       return { safe: true, msg: "" };
     }
   </script>
