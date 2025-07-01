@@ -32,7 +32,7 @@
 </head>
 <body>
 <h1>C42 Flight Buddy</h1>
-<p><em>Version: 2025-07-01-03</em></p>
+<p><em>Version: 2025-07-01-04</em></p>
 <p>Check flight weather from Swansea Airport</p>
 
 <label for="start">Flight start (GMT):</label>
@@ -85,24 +85,40 @@ async function checkFlight() {
     const forecastResp = await fetch(`https://api.openweathermap.org/data/2.5/forecast?lat=${LAT}&lon=${LON}&appid=${API_KEY}&units=metric`);
     const forecastData = await forecastResp.json();
 
-    // Find forecast interval containing flight start time (previous or equal start)
+    // Find the forecast block starting at or immediately before flight start
     let previousInterval = null;
-    for (const item of forecastData.list) {
+    for (let i = forecastData.list.length - 1; i >= 0; i--) {
+      const item = forecastData.list[i];
       const forecastStart = new Date(item.dt * 1000);
-      const forecastEnd = new Date(forecastStart.getTime() + 3 * 3600 * 1000);
-      if (forecastStart <= startTime && forecastEnd > startTime) {
+      if (forecastStart <= startTime) {
         previousInterval = item;
         break;
       }
     }
+    // If none before startTime, take earliest after startTime
+    if (!previousInterval) {
+      for (let i = 0; i < forecastData.list.length; i++) {
+        const item = forecastData.list[i];
+        const forecastStart = new Date(item.dt * 1000);
+        if (forecastStart > startTime) {
+          previousInterval = item;
+          break;
+        }
+      }
+    }
 
-    // Include previous interval if found + any intervals overlapping flight window after startTime
+    if (!previousInterval) {
+      resDiv.innerHTML = '<p class="bad">No forecast data available for selected flight window.</p>';
+      return;
+    }
+
+    // Collect relevant forecasts from previousInterval and those overlapping flight window
     let relevantForecasts = [];
-    if (previousInterval) relevantForecasts.push(previousInterval);
+    relevantForecasts.push(previousInterval);
 
     forecastData.list.forEach(item => {
       const forecastStart = new Date(item.dt * 1000);
-      if (forecastStart > startTime && forecastStart < endTime) {
+      if (forecastStart > previousInterval.dt * 1000 && forecastStart < endTime) {
         relevantForecasts.push(item);
       }
     });
