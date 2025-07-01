@@ -1,0 +1,110 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>C42 Flight Buddy</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 600px;
+      margin: auto;
+      padding: 20px;
+      background: #f5f5f5;
+      color: #333;
+    }
+    input, button {
+      padding: 10px;
+      margin: 5px 0;
+      width: 100%;
+      font-size: 1rem;
+    }
+    #results {
+      margin-top: 20px;
+      padding: 15px;
+      background: #fff;
+      border-radius: 5px;
+    }
+    .ok { color: green; }
+    .bad { color: red; }
+  </style>
+</head>
+<body>
+  <h1>C42 Flight Buddy</h1>
+  <p>Check flight weather from Swansea Airport</p>
+
+  <label for="start">Flight start (UTC):</label>
+  <input type="datetime-local" id="start" />
+
+  <label for="end">Flight end (UTC):</label>
+  <input type="datetime-local" id="end" />
+
+  <button onclick="checkFlight()">Check Flight</button>
+
+  <div id="results"></div>
+
+  <script>
+    const LAT = 51.605;
+    const LON = -4.064;
+    const API_KEY = 'YOUR_OPENWEATHERMAP_API_KEY'; // Replace before publishing
+
+    async function checkFlight() {
+      const start = document.getElementById("start").value;
+      const end = document.getElementById("end").value;
+      const resDiv = document.getElementById("results");
+
+      if (!start || !end || new Date(start) >= new Date(end)) {
+        resDiv.innerHTML = '<p class="bad">Please enter a valid time range.</p>';
+        return;
+      }
+
+      resDiv.innerHTML = '<p>Loading weather data...</p>';
+      try {
+        const resp = await fetch(`https://api.openweathermap.org/data/2.5/weather?lat=${LAT}&lon=${LON}&appid=${API_KEY}&units=metric`);
+        const data = await resp.json();
+
+        const windDeg = data.wind.deg || 0;
+        const windKts = (data.wind.speed * 1.94384).toFixed(1);
+        const pressure = data.main.pressure;
+        const visibility = data.visibility;
+        const weather = data.weather[0].description;
+
+        const runway = predictRunway(windDeg);
+        const safe = checkLimits(windKts, visibility, weather);
+
+        resDiv.innerHTML = `
+          <h3>Results</h3>
+          <p><strong>QNH:</strong> ${pressure} hPa</p>
+          <p><strong>Wind:</strong> ${windDeg}&deg; @ ${windKts} kt</p>
+          <p><strong>Visibility:</strong> ${visibility} m</p>
+          <p><strong>Weather:</strong> ${weather}</p>
+          <p><strong>Predicted Runway:</strong> ${runway}</p>
+          <p class="${safe.safe ? 'ok' : 'bad'}"><strong>${safe.msg}</strong></p>
+          <p><a href="https://www.metoffice.gov.uk/pub/data/weather/uk/uk_forecast_weather_chart/f214.pdf" target="_blank">F214 Chart</a> |
+             <a href="https://www.metoffice.gov.uk/pub/data/weather/uk/uk_forecast_weather_chart/f215.pdf" target="_blank">F215 Chart</a></p>
+        `;
+      } catch (e) {
+        resDiv.innerHTML = '<p class="bad">Error fetching weather data.</p>';
+      }
+    }
+
+    function predictRunway(windDir) {
+      const runways = { '04': 40, '22': 220, '10': 100, '28': 280 };
+      let best = Object.entries(runways).reduce((a, b) => {
+        const aDiff = Math.min(Math.abs(a[1] - windDir), 360 - Math.abs(a[1] - windDir));
+        const bDiff = Math.min(Math.abs(b[1] - windDir), 360 - Math.abs(b[1] - windDir));
+        return aDiff < bDiff ? a : b;
+      });
+      return best[0];
+    }
+
+    function checkLimits(wind, vis, desc) {
+      if (parseFloat(wind) > 20) return { safe: false, msg: "❌ Wind exceeds C42 limits" };
+      if (vis < 5000) return { safe: false, msg: "❌ Visibility too low for C42" };
+      if (desc.toLowerCase().includes("rain")) return { safe: false, msg: "❌ Rain not suitable for C42" };
+      return { safe: true, msg: "✅ Weather suitable for C42 flight" };
+    }
+  </script>
+</body>
+</html>
