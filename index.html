@@ -32,8 +32,8 @@
 </head>
 <body>
 <h1>C42 Flight Buddy</h1>
-<p><em>Version: 2025-07-01-05</em></p>
-<p>Check flight weather from Swansea Airport (EGFH)</p>
+<p><em>Version: 2025-07-01-04</em></p>
+<p>Check flight weather from Swansea Airport</p>
 
 <label for="start">Flight start (GMT):</label>
 <input type="datetime-local" id="start"/>
@@ -46,8 +46,10 @@
 <div id="results"></div>
 
 <script>
-const API_KEY = '1716ac7499b0440ca6d984c09a569c8b';
-const elevation = 295; // meters (for QFE calculation)
+const LAT = 51.605;
+const LON = -4.064;
+const API_KEY = '81a0d8bef1288c6437560f89b336dd33';
+const elevation = 295; // meters
 
 async function checkFlight() {
   const startInput = document.getElementById("start").value;
@@ -59,104 +61,126 @@ async function checkFlight() {
     return;
   }
 
-  const startTime = new Date(startInput + "Z"); // treat as GMT
+  const startTime = new Date(startInput + "Z"); // parse as GMT
   const now = new Date();
   const maxForecastTime = new Date(now.getTime() + 5 * 24 * 60 * 60 * 1000); // now + 5 days
   const endTime = new Date(startTime.getTime() + duration * 3600 * 1000);
 
   if (startTime <= now) {
-    resDiv.innerHTML = '<p class="bad">Please enter a valid start time in the future within the next 5 days.</p>';
+    resDiv.innerHTML = '<p class="bad">Please enter a valid start time and duration within the next 5 days.</p>';
     return;
   }
-  if (startTime > maxForecastTime || endTime > maxForecastTime) {
-    resDiv.innerHTML = '<p class="bad">Flight time must be within the next 5 days.</p>';
+  if (startTime > maxForecastTime) {
+    resDiv.innerHTML = '<p class="bad">Please enter a valid start time and duration within the next 5 days.</p>';
+    return;
+  }
+  if (endTime > maxForecastTime) {
+    resDiv.innerHTML = '<p class="bad">Flight end time is beyond forecast range. Please reduce duration or start time.</p>';
     return;
   }
 
-  resDiv.innerHTML = '<p>Loading METAR and TAF data...</p>';
+  resDiv.innerHTML = '<p>Loading weather data...</p>';
 
   try {
-    // Fetch METAR decoded
-    const metarResp = await fetch(`https://api.checkwx.com/metar/EGFH/decoded`, {
-      headers: { 'X-API-Key': API_KEY }
-    });
-    if (!metarResp.ok) throw new Error("Failed to fetch METAR");
-    const metarData = await metarResp.json();
+    const forecastResp = await fetch(`https://api.openweathermap.org/data/2.5/forecast?lat=${LAT}&lon=${LON}&appid=${API_KEY}&units=metric`);
+    const forecastData = await forecastResp.json();
 
-    // Fetch TAF decoded
-    const tafResp = await fetch(`https://api.checkwx.com/taf/EGFH/decoded`, {
-      headers: { 'X-API-Key': API_KEY }
-    });
-    if (!tafResp.ok) throw new Error("Failed to fetch TAF");
-    const tafData = await tafResp.json();
+    // Find the forecast block starting at or immediately before flight start
+    let previousInterval = null;
+    for (let i = forecastData.list.length - 1; i >= 0; i--) {
+      const item = forecastData.list[i];
+      const forecastStart = new Date(item.dt * 1000);
+      if (forecastStart <= startTime) {
+        previousInterval = item;
+        break;
+      }
+    }
+    // If none before startTime, take earliest after startTime
+    if (!previousInterval) {
+      for (let i = 0; i < forecastData.list.length; i++) {
+        const item = forecastData.list[i];
+        const forecastStart = new Date(item.dt * 1000);
+        if (forecastStart > startTime) {
+          previousInterval = item;
+          break;
+        }
+      }
+    }
 
-    // Get latest METAR decoded report (first in array)
-    const metarReport = metarData.data && metarData.data.length > 0 ? metarData.data[0] : null;
-    if (!metarReport) {
-      resDiv.innerHTML = '<p class="bad">No METAR data available.</p>';
+    if (!previousInterval) {
+      resDiv.innerHTML = '<p class="bad">No forecast data available for selected flight window.</p>';
       return;
     }
 
-    // Get latest TAF decoded report (first in array)
-    const tafReport = tafData.data && tafData.data.length > 0 ? tafData.data[0] : null;
+    // Collect relevant forecasts from previousInterval and those overlapping flight window
+    let relevantForecasts = [];
+    relevantForecasts.push(previousInterval);
 
-    // Extract and format METAR info
-    const qnh = metarReport.altimeter_hpa || "N/A";
-    // Calculate QFE (QNH - elevation*0.12)
-    const qfe = qnh !== "N/A" ? (qnh - elevation * 0.12).toFixed(1) : "N/A";
+    forecastData.list.forEach(item => {
+      const forecastStart = new Date(item.dt * 1000);
+      if (forecastStart > previousInterval.dt * 1000 && forecastStart < endTime) {
+        relevantForecasts.push(item);
+      }
+    });
 
-    const windDir = metarReport.wind && metarReport.wind.degrees !== undefined ? metarReport.wind.degrees : null;
-    const windSpeedMps = metarReport.wind && metarReport.wind.speed_kts !== undefined ? metarReport.wind.speed_kts * 0.514444 : null; // knots to m/s
-    const windSpeedKts = metarReport.wind && metarReport.wind.speed_kts !== undefined ? metarReport.wind.speed_kts : null;
+    if (relevantForecasts.length === 0) {
+      resDiv.innerHTML = '<p class="bad">No forecast data available for selected flight window.</p>';
+      return;
+    }
 
-    const visibilityM = metarReport.visibility_distance_m ? metarReport.visibility_distance_m : 9999;
+    let issues = [];
+    let messages = [];
 
-    const clouds = metarReport.clouds || [];
-    const totalCloudCover = clouds.length > 0 ? clouds.reduce((acc, c) => acc + (c.coverage ? cloudCoverageToPercent(c.coverage) : 0), 0) : 0;
+    relevantForecasts.forEach((item) => {
+      const main = item.main || {};
+      const wind = item.wind || {};
+      const weatherArr = item.weather || [];
+      const pressure = main.pressure || 0;
+      const windDeg = wind.deg || 0;
+      const windSpeed = wind.speed || 0;
+      const visibility = item.visibility !== undefined ? item.visibility : 10000;
+      const cloudCover = item.clouds ? item.clouds.all : 0;
+      const weatherDesc = weatherArr.length ? weatherArr[0].description : "unknown";
 
-    const weatherConditions = metarReport.wx_codes || [];
+      // QFE = QNH - (elevation in meters * 0.12)
+      const QFE = (pressure - (elevation * 0.12)).toFixed(1);
+      const windKts = (windSpeed * 1.94384).toFixed(1);
 
-    // Predict runway based on wind direction (use your existing logic)
-    const runway = windDir !== null ? predictRunway(windDir) : "Unknown";
+      const runway = predictRunway(windDeg);
+      const safe = checkLimits(windKts, visibility, weatherDesc, cloudCover);
 
-    // Check limits
-    const safe = checkLimits(windSpeedKts, visibilityM, weatherConditions.join(", "), totalCloudCover);
+      let timeLabel = new Date(item.dt * 1000).toUTCString().replace("UTC", "GMT");
 
-    // Format METAR summary
-    let metarSummary =
-`METAR for EGFH:
-Time: ${metarReport.time ? metarReport.time.utc : "Unknown"} GMT
-QNH: ${qnh} hPa
-QFE: ${qfe} hPa
-Wind: ${windDir !== null ? windDir + "°" : "N/A"} @ ${windSpeedKts !== null ? windSpeedKts + " kt" : "N/A"}
-Visibility: ${visibilityM} m
-Cloud cover (approx.): ${totalCloudCover} %
-Weather: ${weatherConditions.length > 0 ? weatherConditions.join(", ") : "None"}
+      messages.push(
+`Time: ${timeLabel}
+QNH: ${pressure} hPa
+QFE: ${QFE} hPa
+Wind: ${windDeg}° @ ${windKts} kt
+Visibility: ${visibility} m
+Cloud cover: ${cloudCover} %
+Weather: ${weatherDesc}
 Predicted Runway: ${runway}
-Status: ${safe.safe ? "✅ OK" : "❌ Limit Exceeded - " + safe.msg}
-`;
+Status: ${safe.safe ? "✅ OK" : "❌ Limit Exceeded"}
+`
+      );
 
-    // Format TAF text
-    let tafSummary = tafReport ? 
-`TAF for EGFH:
-${tafReport.raw_text || tafReport.raw || "No TAF text available."}`
-    : "No TAF data available.";
+      if (!safe.safe) {
+        issues.push(`At ${timeLabel}: ${safe.msg}`);
+      }
+    });
 
-    resDiv.innerHTML = `<pre>${metarSummary}\n\n${tafSummary}</pre>`;
+    const overallStatus = issues.length === 0
+      ? '<p class="ok"><strong>✅ Weather suitable for full flight duration.</strong></p>'
+      : `<p class="bad"><strong>❌ Weather issues detected during flight:</strong><br>${issues.join("<br>")}</p>`;
 
-  } catch (err) {
-    resDiv.innerHTML = `<p class="bad">Error fetching weather data: ${err.message}</p>`;
-  }
-}
+    resDiv.innerHTML = `
+      <h3>Flight Weather Check for ${startTime.toUTCString().replace("UTC", "GMT")} to ${endTime.toUTCString().replace("UTC", "GMT")}</h3>
+      <pre>${messages.join("\n")}</pre>
+      ${overallStatus}
+    `;
 
-function cloudCoverageToPercent(coverage) {
-  // coverage is like "FEW", "SCT", "BKN", "OVC"
-  switch(coverage) {
-    case "FEW": return 25;
-    case "SCT": return 50;
-    case "BKN": return 75;
-    case "OVC": return 100;
-    default: return 0;
+  } catch (e) {
+    resDiv.innerHTML = '<p class="bad">Error fetching weather data.</p>';
   }
 }
 
@@ -171,10 +195,10 @@ function predictRunway(windDir) {
 }
 
 function checkLimits(wind, vis, desc, cloudCover) {
-  if (wind !== null && wind > 20) return { safe: false, msg: "Wind exceeds C42 limits (>20 kt)" };
+  if (parseFloat(wind) > 20) return { safe: false, msg: "Wind exceeds C42 limits (>20 kt)" };
   if (vis < 5000) return { safe: false, msg: "Visibility too low (<5000 m)" };
   if (desc.toLowerCase().includes("rain")) return { safe: false, msg: "Rain not suitable for C42" };
-  if (cloudCover > 80 && vis < 5000) {
+  if (cloudCover !== undefined && cloudCover > 80 && vis < 5000) {
     return { safe: false, msg: "High cloud cover with low visibility — possible low cloud or fog" };
   }
   return { safe: true, msg: "" };
