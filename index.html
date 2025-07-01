@@ -3,7 +3,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>C42 Flight Buddy</title>
   <style>
     body {
@@ -35,10 +35,10 @@
   <p>Check flight weather from Swansea Airport</p>
 
   <label for="start">Flight start (UTC):</label>
-  <input type="datetime-local" id="start" />
+  <input type="datetime-local" id="start"/>
 
-  <label for="end">Flight end (UTC):</label>
-  <input type="datetime-local" id="end" />
+  <label for="duration">Flight duration (hours):</label>
+  <input type="number" id="duration" min="0.5" step="0.5" value="1"/>
 
   <button onclick="checkFlight()">Check Flight</button>
 
@@ -47,15 +47,15 @@
   <script>
     const LAT = 51.605;
     const LON = -4.064;
-    const API_KEY = 'YOUR_OPENWEATHERMAP_API_KEY'; // Replace before publishing
+    const API_KEY = '81a0d8bef1288c6437560f89b336dd33';
 
     async function checkFlight() {
       const start = document.getElementById("start").value;
-      const end = document.getElementById("end").value;
+      const duration = parseFloat(document.getElementById("duration").value);
       const resDiv = document.getElementById("results");
 
-      if (!start || !end || new Date(start) >= new Date(end)) {
-        resDiv.innerHTML = '<p class="bad">Please enter a valid time range.</p>';
+      if (!start || isNaN(duration) || duration <= 0) {
+        resDiv.innerHTML = '<p class="bad">Please enter a valid start time and duration.</p>';
         return;
       }
 
