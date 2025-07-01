@@ -1,9 +1,8 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>C42 Flight Buddy</title>
   <style>
     body {
@@ -48,6 +47,7 @@
     const LAT = 51.605;
     const LON = -4.064;
     const API_KEY = '81a0d8bef1288c6437560f89b336dd33';
+    const elevation = 295; // meters
 
     async function checkFlight() {
       const start = document.getElementById("start").value;
@@ -64,9 +64,10 @@
         const resp = await fetch(`https://api.openweathermap.org/data/2.5/weather?lat=${LAT}&lon=${LON}&appid=${API_KEY}&units=metric`);
         const data = await resp.json();
 
+        const pressure = data.main.pressure; // QNH in hPa
+        const QFE = (pressure - (elevation * 0.12)).toFixed(1);
         const windDeg = data.wind.deg || 0;
         const windKts = (data.wind.speed * 1.94384).toFixed(1);
-        const pressure = data.main.pressure;
         const visibility = data.visibility;
         const weather = data.weather[0].description;
 
@@ -76,13 +77,16 @@
         resDiv.innerHTML = `
           <h3>Results</h3>
           <p><strong>QNH:</strong> ${pressure} hPa</p>
+          <p><strong>QFE:</strong> ${QFE} hPa</p>
           <p><strong>Wind:</strong> ${windDeg}&deg; @ ${windKts} kt</p>
           <p><strong>Visibility:</strong> ${visibility} m</p>
           <p><strong>Weather:</strong> ${weather}</p>
           <p><strong>Predicted Runway:</strong> ${runway}</p>
           <p class="${safe.safe ? 'ok' : 'bad'}"><strong>${safe.msg}</strong></p>
-          <p><a href="https://www.metoffice.gov.uk/pub/data/weather/uk/uk_forecast_weather_chart/f214.pdf" target="_blank">F214 Chart</a> |
-             <a href="https://www.metoffice.gov.uk/pub/data/weather/uk/uk_forecast_weather_chart/f215.pdf" target="_blank">F215 Chart</a></p>
+          <p>
+            <a href="https://www.metoffice.gov.uk/pub/data/weather/uk/uk_forecast_weather_chart/f214.pdf" target="_blank">F214 Chart</a> |
+            <a href="https://www.metoffice.gov.uk/pub/data/weather/uk/uk_forecast_weather_chart/f215.pdf" target="_blank">F215 Chart</a>
+          </p>
         `;
       } catch (e) {
         resDiv.innerHTML = '<p class="bad">Error fetching weather data.</p>';
@@ -108,3 +112,4 @@
   </script>
 </body>
 </html>
+
