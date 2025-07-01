@@ -31,7 +31,9 @@
 </style>
 </head>
 <body>
+<!-- C42 Flight Buddy version: 2025-07-01-01 -->
 <h1>C42 Flight Buddy</h1>
+<p><em>Version: 2025-07-01-01</em></p>
 <p>Check flight weather from Swansea Airport</p>
 
 <label for="start">Flight start (GMT):</label>
@@ -80,10 +82,8 @@ async function checkFlight() {
     const forecastResp = await fetch(`https://api.openweathermap.org/data/2.5/forecast?lat=${LAT}&lon=${LON}&appid=${API_KEY}&units=metric`);
     const forecastData = await forecastResp.json();
 
-    // OpenWeatherMap forecast points are every 3 hours, valid for 3 hours from dt
     // Filter forecast points where forecast window overlaps flight window:
     // forecast start <= flight end && forecast end >= flight start
-
     const relevantForecasts = forecastData.list.filter(item => {
       const forecastStart = new Date(item.dt * 1000);
       const forecastEnd = new Date(forecastStart.getTime() + 3 * 3600 * 1000);
@@ -109,6 +109,7 @@ async function checkFlight() {
       const cloudCover = item.clouds ? item.clouds.all : 0;
       const weatherDesc = weatherArr.length ? weatherArr[0].description : "unknown";
 
+      // QFE = QNH - (elevation in meters * 0.12)
       const QFE = (pressure - (elevation * 0.12)).toFixed(1);
       const windKts = (windSpeed * 1.94384).toFixed(1);
 
