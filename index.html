@@ -28,6 +28,13 @@
     }
     .ok { color: green; }
     .bad { color: red; }
+    #version {
+      margin-top: 40px;
+      font-size: 0.85rem;
+      color: #666;
+      text-align: center;
+      user-select: none;
+    }
   </style>
 </head>
 <body>
@@ -43,6 +50,8 @@
   <button onclick="checkFlight()">Check Flight</button>
 
   <div id="results"></div>
+
+  <div id="version">Version: 1.2</div>
 
   <script>
     const LAT = 51.605;
