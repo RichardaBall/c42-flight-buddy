@@ -14,8 +14,8 @@
 </head>
 <body>
 <h1>C42 Flight Buddy - METAR via CheckWX</h1>
-<p><em>Version: 2025-07-01-05</em></p>
-<p>Check flight weather from Swansea Airport (EGNS)</p>
+<p><em>Version: 2025-07-01-06</em></p>
+<p>Check flight weather from Cardiff Airport (EGFH)</p>
 
 <label for="start">Flight start (GMT):</label>
 <input type="datetime-local" id="start" />
@@ -28,9 +28,9 @@
 <div id="results"></div>
 
 <script>
-const elevationM = 295; // Swansea Airport elevation
+const elevationM = 295; // Airport elevation
 const CHECKWX_API_KEY = '1716ac7499b0440ca6d984c09a569c8b';
-const ICAO = 'EGNS';
+const ICAO = 'EGFH';
 
 function predictRunway(windDir) {
   const runways = { '04': 40, '22': 220, '10': 100, '28': 280 };
@@ -61,14 +61,6 @@ async function fetchMetar() {
   return data.data[0];
 }
 
-function formatDateToGMTLocal(dt) {
-  // Convert UTC ISO date string to local datetime-local input format yyyy-MM-ddTHH:mm
-  let d = new Date(dt);
-  let offset = d.getTimezoneOffset() * 60000;
-  let localDate = new Date(d.getTime() - offset);
-  return localDate.toISOString().slice(0,16);
-}
-
 async function checkFlight() {
   const startInput = document.getElementById("start").value;
   const duration = parseFloat(document.getElementById("duration").value);
@@ -80,8 +72,7 @@ async function checkFlight() {
     return;
   }
 
-  // Input is local datetime but treat as GMT (the user should enter GMT time)
-  const startTime = new Date(startInput + "Z"); // parse as GMT
+  const startTime = new Date(startInput + "Z"); // treat input as GMT
   const now = new Date();
   const maxFuture = new Date(now.getTime() + 5*24*3600*1000);
   const endTime = new Date(startTime.getTime() + duration * 3600 * 1000);
@@ -100,17 +91,14 @@ async function checkFlight() {
   try {
     const metar = await fetchMetar();
 
-    // Extract data
-    const pressureQNH = metar.barometer?.pressure_mb || null; // hPa
-    // QFE = QNH - (elevation * 0.12)
-    const pressureQFE = pressureQNH ? (pressureQNH - elevationM*0.12).toFixed(1) : null;
+    const pressureQNH = metar.barometer?.pressure_mb || null;
+    const pressureQFE = pressureQNH ? (pressureQNH - elevationM * 0.12).toFixed(1) : null;
 
     const windDir = metar.wind?.degrees || 0;
     const windSpeedKts = metar.wind?.speed_kts || 0;
 
     const visibilityM = metar.visibility?.meters || 10000;
 
-    // Cloud base feet AGL from clouds array; pick lowest base cloud if available
     let cloudBaseFeet = null;
     if (metar.clouds && metar.clouds.length > 0) {
       let bases = metar.clouds
@@ -119,7 +107,6 @@ async function checkFlight() {
       if (bases.length) cloudBaseFeet = Math.min(...bases);
     }
 
-    // Conditions array: description strings from metar.conditions or empty array
     const conditions = metar.conditions ? metar.conditions.map(c => c.description) : [];
 
     const runway = predictRunway(windDir);
