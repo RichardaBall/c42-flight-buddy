@@ -50,43 +50,68 @@
     const elevation = 295; // meters
 
     async function checkFlight() {
-      const start = document.getElementById("start").value;
+      const startInput = document.getElementById("start").value;
       const duration = parseFloat(document.getElementById("duration").value);
       const resDiv = document.getElementById("results");
 
-      if (!start || isNaN(duration) || duration <= 0) {
+      if (!startInput || isNaN(duration) || duration <= 0) {
         resDiv.innerHTML = '<p class="bad">Please enter a valid start time and duration.</p>';
         return;
       }
 
-      resDiv.innerHTML = '<p>Loading weather data...</p>';
-      try {
-        const resp = await fetch(`https://api.openweathermap.org/data/2.5/weather?lat=${LAT}&lon=${LON}&appid=${API_KEY}&units=metric`);
-        const data = await resp.json();
+      const startTime = new Date(startInput);
+      const now = new Date();
+      const diffMs = startTime - now;
 
-        const pressure = data.main.pressure; // QNH in hPa
+      resDiv.innerHTML = '<p>Loading weather data...</p>';
+
+      try {
+        let weatherData;
+
+        if (diffMs > 3 * 60 * 60 * 1000) {
+          // Use forecast API
+          const resp = await fetch(`https://api.openweathermap.org/data/2.5/forecast?lat=${LAT}&lon=${LON}&appid=${API_KEY}&units=metric`);
+          const data = await resp.json();
+
+          // Find closest forecast to startTime
+          weatherData = data.list.reduce((closest, curr) => {
+            const currTime = new Date(curr.dt * 1000);
+            return Math.abs(currTime - startTime) < Math.abs(new Date(closest.dt * 1000) - startTime) ? curr : closest;
+          });
+
+        } else {
+          // Use current weather API
+          const resp = await fetch(`https://api.openweathermap.org/data/2.5/weather?lat=${LAT}&lon=${LON}&appid=${API_KEY}&units=metric`);
+          weatherData = await resp.json();
+        }
+
+        // Extract data depending on forecast or current API response format
+        const main = weatherData.main || {};
+        const wind = weatherData.wind || {};
+        const weatherArr = weatherData.weather || [];
+        const pressure = main.pressure || 0;
+        const windDeg = wind.deg || 0;
+        const windSpeed = wind.speed || 0;
+        const visibility = weatherData.visibility !== undefined ? weatherData.visibility : 10000; // forecast API has no visibility, assume 10km
+        const weatherDesc = weatherArr.length ? weatherArr[0].description : "unknown";
+
         const QFE = (pressure - (elevation * 0.12)).toFixed(1);
-        const windDeg = data.wind.deg || 0;
-        const windKts = (data.wind.speed * 1.94384).toFixed(1);
-        const visibility = data.visibility;
-        const weather = data.weather[0].description;
+        const windKts = (windSpeed * 1.94384).toFixed(1);
 
         const runway = predictRunway(windDeg);
-        const safe = checkLimits(windKts, visibility, weather);
+        const safe = checkLimits(windKts, visibility, weatherDesc);
 
         resDiv.innerHTML = `
-          <h3>Results</h3>
+          <h3>Results for ${startTime.toUTCString()}</h3>
           <p><strong>QNH:</strong> ${pressure} hPa</p>
           <p><strong>QFE:</strong> ${QFE} hPa</p>
           <p><strong>Wind:</strong> ${windDeg}&deg; @ ${windKts} kt</p>
           <p><strong>Visibility:</strong> ${visibility} m</p>
-          <p><strong>Weather:</strong> ${weather}</p>
+          <p><strong>Weather:</strong> ${weatherDesc}</p>
           <p><strong>Predicted Runway:</strong> ${runway}</p>
           <p class="${safe.safe ? 'ok' : 'bad'}"><strong>${safe.msg}</strong></p>
-          <p>
-            <a href="https://www.metoffice.gov.uk/services/transport/aviation" target="_blank">Met Office Aviation Charts</a>
-          </p>
         `;
+
       } catch (e) {
         resDiv.innerHTML = '<p class="bad">Error fetching weather data.</p>';
       }
