@@ -1,145 +1,124 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>C42 Flight Buddy</title>
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      max-width: 600px;
-      margin: auto;
-      padding: 20px;
-      background: #f5f5f5;
-      color: #333;
-    }
-    input, button {
-      padding: 10px;
-      margin: 5px 0;
-      width: 100%;
-      font-size: 1rem;
-    }
-    #results {
-      margin-top: 20px;
-      padding: 15px;
-      background: #fff;
-      border-radius: 5px;
-      white-space: pre-wrap;
-    }
-    .ok { color: green; }
-    .bad { color: red; }
-    #version {
-      margin-top: 40px;
-      font-size: 0.85rem;
-      color: #666;
-      text-align: center;
-      user-select: none;
-    }
-  </style>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>C42 Flight Buddy</title>
+<style>
+  body {
+    font-family: Arial, sans-serif;
+    max-width: 600px;
+    margin: auto;
+    padding: 20px;
+    background: #f5f5f5;
+    color: #333;
+  }
+  input, button {
+    padding: 10px;
+    margin: 5px 0;
+    width: 100%;
+    font-size: 1rem;
+  }
+  #results {
+    margin-top: 20px;
+    padding: 15px;
+    background: #fff;
+    border-radius: 5px;
+    white-space: pre-wrap;
+  }
+  .ok { color: green; }
+  .bad { color: red; }
+</style>
 </head>
 <body>
-  <h1>C42 Flight Buddy</h1>
-  <p>Check flight weather from Swansea Airport</p>
+<h1>C42 Flight Buddy</h1>
+<p>Check flight weather from Swansea Airport</p>
 
-  <label for="start">Flight start (GMT):</label>
-  <input type="datetime-local" id="start"/>
+<label for="start">Flight start (GMT):</label>
+<input type="datetime-local" id="start"/>
 
-  <label for="duration">Flight duration (hours):</label>
-  <input type="number" id="duration" min="0.5" step="0.5" value="1"/>
+<label for="duration">Flight duration (hours):</label>
+<input type="number" id="duration" min="0.5" step="0.5" value="1"/>
 
-  <button onclick="checkFlight()">Check Flight</button>
+<button onclick="checkFlight()">Check Flight</button>
 
-  <div id="results"></div>
+<div id="results"></div>
 
-  <div id="version">Version: 1.2</div>
+<script>
+const LAT = 51.605;
+const LON = -4.064;
+const API_KEY = '81a0d8bef1288c6437560f89b336dd33';
+const elevation = 295; // meters
 
-  <script>
-    const LAT = 51.605;
-    const LON = -4.064;
-    const API_KEY = '81a0d8bef1288c6437560f89b336dd33';
-    const elevation = 295; // meters
+async function checkFlight() {
+  const startInput = document.getElementById("start").value;
+  const duration = parseFloat(document.getElementById("duration").value);
+  const resDiv = document.getElementById("results");
 
-    async function checkFlight() {
-      const startInput = document.getElementById("start").value;
-      const duration = parseFloat(document.getElementById("duration").value);
-      const resDiv = document.getElementById("results");
+  if (!startInput || isNaN(duration) || duration <= 0) {
+    resDiv.innerHTML = '<p class="bad">Please enter a valid start time and duration.</p>';
+    return;
+  }
 
-      if (!startInput || isNaN(duration) || duration <= 0) {
-        resDiv.innerHTML = '<p class="bad">Please enter a valid start time and duration.</p>';
-        return;
-      }
+  const startTime = new Date(startInput + "Z"); // parse as GMT
+  const now = new Date();
+  const maxForecastTime = new Date(now.getTime() + 5 * 24 * 60 * 60 * 1000); // now + 5 days
+  const endTime = new Date(startTime.getTime() + duration * 3600 * 1000);
 
-      const startTime = new Date(startInput + "Z"); // parse as GMT
-      const now = new Date();
-      const maxForecastTime = new Date(now.getTime() + 5 * 24 * 60 * 60 * 1000); // now + 5 days
-      const endTime = new Date(startTime.getTime() + duration * 3600 * 1000);
+  if (startTime <= now || startTime > maxForecastTime) {
+    resDiv.innerHTML = '<p class="bad">Please enter a valid start time and duration within the next 5 days.</p>';
+    return;
+  }
+  if (endTime > maxForecastTime) {
+    resDiv.innerHTML = '<p class="bad">Flight end time is beyond forecast range. Please reduce duration or start time.</p>';
+    return;
+  }
 
-      if (startTime <= now || startTime > maxForecastTime) {
-        resDiv.innerHTML = '<p class="bad">Please enter a valid start time and duration within the next 5 days.</p>';
-        return;
-      }
-      if (endTime > maxForecastTime) {
-        resDiv.innerHTML = '<p class="bad">Flight end time is beyond forecast range. Please reduce duration or start time.</p>';
-        return;
-      }
+  resDiv.innerHTML = '<p>Loading weather data...</p>';
 
-      resDiv.innerHTML = '<p>Loading weather data...</p>';
+  try {
+    const forecastResp = await fetch(`https://api.openweathermap.org/data/2.5/forecast?lat=${LAT}&lon=${LON}&appid=${API_KEY}&units=metric`);
+    const forecastData = await forecastResp.json();
 
-      try {
-        const forecastResp = await fetch(`https://api.openweathermap.org/data/2.5/forecast?lat=${LAT}&lon=${LON}&appid=${API_KEY}&units=metric`);
-        const forecastData = await forecastResp.json();
+    // OpenWeatherMap forecast points are every 3 hours, valid for 3 hours from dt
+    // Filter forecast points where forecast window overlaps flight window:
+    // forecast start <= flight end && forecast end >= flight start
 
-        let currentWeather = null;
-        const diffMs = startTime - now;
-        if (diffMs <= 3 * 3600 * 1000) {
-          const currentResp = await fetch(`https://api.openweathermap.org/data/2.5/weather?lat=${LAT}&lon=${LON}&appid=${API_KEY}&units=metric`);
-          currentWeather = await currentResp.json();
-        }
+    const relevantForecasts = forecastData.list.filter(item => {
+      const forecastStart = new Date(item.dt * 1000);
+      const forecastEnd = new Date(forecastStart.getTime() + 3 * 3600 * 1000);
+      return (forecastStart <= endTime) && (forecastEnd >= startTime);
+    });
 
-        // Include forecast points that start within 3 hours before flight start (to catch overlapping) up to endTime
-        const relevantForecasts = forecastData.list.filter(item => {
-          const itemTime = new Date(item.dt * 1000);
-          return itemTime >= new Date(startTime.getTime() - 3 * 3600 * 1000) && itemTime <= endTime;
-        });
+    if (relevantForecasts.length === 0) {
+      resDiv.innerHTML = '<p class="bad">No forecast data available for selected flight window.</p>';
+      return;
+    }
 
-        if (duration <= 3 && currentWeather && startTime <= now) {
-          relevantForecasts.unshift(currentWeather);
-        }
+    let issues = [];
+    let messages = [];
 
-        if (relevantForecasts.length === 0) {
-          resDiv.innerHTML = '<p class="bad">No forecast data available for selected flight window.</p>';
-          return;
-        }
+    relevantForecasts.forEach((item) => {
+      const main = item.main || {};
+      const wind = item.wind || {};
+      const weatherArr = item.weather || [];
+      const pressure = main.pressure || 0;
+      const windDeg = wind.deg || 0;
+      const windSpeed = wind.speed || 0;
+      const visibility = item.visibility !== undefined ? item.visibility : 10000;
+      const cloudCover = item.clouds ? item.clouds.all : 0;
+      const weatherDesc = weatherArr.length ? weatherArr[0].description : "unknown";
 
-        let issues = [];
-        let messages = [];
+      const QFE = (pressure - (elevation * 0.12)).toFixed(1);
+      const windKts = (windSpeed * 1.94384).toFixed(1);
 
-        relevantForecasts.forEach((item) => {
-          const main = item.main || {};
-          const wind = item.wind || {};
-          const weatherArr = item.weather || [];
-          const pressure = main.pressure || 0;
-          const windDeg = wind.deg || 0;
-          const windSpeed = wind.speed || 0;
-          const visibility = item.visibility !== undefined ? item.visibility : 10000;
-          const cloudCover = item.clouds ? item.clouds.all : 0;
-          const weatherDesc = weatherArr.length ? weatherArr[0].description : "unknown";
+      const runway = predictRunway(windDeg);
+      const safe = checkLimits(windKts, visibility, weatherDesc, cloudCover);
 
-          const QFE = (pressure - (elevation * 0.12)).toFixed(1);
-          const windKts = (windSpeed * 1.94384).toFixed(1);
+      let timeLabel = new Date(item.dt * 1000).toUTCString().replace("UTC", "GMT");
 
-          const runway = predictRunway(windDeg);
-          const safe = checkLimits(windKts, visibility, weatherDesc, cloudCover);
-
-          let timeLabel;
-          if (item.dt) {
-            timeLabel = new Date(item.dt * 1000).toUTCString().replace("UTC", "GMT");
-          } else {
-            timeLabel = startTime.toUTCString().replace("UTC", "GMT");
-          }
-
-          messages.push(
-            `Time: ${timeLabel}
+      messages.push(
+`Time: ${timeLabel}
 QNH: ${pressure} hPa
 QFE: ${QFE} hPa
 Wind: ${windDeg}° @ ${windKts} kt
@@ -149,47 +128,47 @@ Weather: ${weatherDesc}
 Predicted Runway: ${runway}
 Status: ${safe.safe ? "✅ OK" : "❌ Limit Exceeded"}
 `
-          );
+      );
 
-          if (!safe.safe) {
-            issues.push(`At ${timeLabel}: ${safe.msg}`);
-          }
-        });
-
-        const overallStatus = issues.length === 0
-          ? '<p class="ok"><strong>✅ Weather suitable for full flight duration.</strong></p>'
-          : `<p class="bad"><strong>❌ Weather issues detected during flight:</strong><br>${issues.join("<br>")}</p>`;
-
-        resDiv.innerHTML = `
-          <h3>Flight Weather Check for ${startTime.toUTCString().replace("UTC", "GMT")} to ${endTime.toUTCString().replace("UTC", "GMT")}</h3>
-          <pre>${messages.join("\n")}</pre>
-          ${overallStatus}
-        `;
-
-      } catch (e) {
-        resDiv.innerHTML = '<p class="bad">Error fetching weather data.</p>';
+      if (!safe.safe) {
+        issues.push(`At ${timeLabel}: ${safe.msg}`);
       }
-    }
+    });
 
-    function predictRunway(windDir) {
-      const runways = { '04': 40, '22': 220, '10': 100, '28': 280 };
-      let best = Object.entries(runways).reduce((a, b) => {
-        const aDiff = Math.min(Math.abs(a[1] - windDir), 360 - Math.abs(a[1] - windDir));
-        const bDiff = Math.min(Math.abs(b[1] - windDir), 360 - Math.abs(b[1] - windDir));
-        return aDiff < bDiff ? a : b;
-      });
-      return best[0];
-    }
+    const overallStatus = issues.length === 0
+      ? '<p class="ok"><strong>✅ Weather suitable for full flight duration.</strong></p>'
+      : `<p class="bad"><strong>❌ Weather issues detected during flight:</strong><br>${issues.join("<br>")}</p>`;
 
-    function checkLimits(wind, vis, desc, cloudCover) {
-      if (parseFloat(wind) > 20) return { safe: false, msg: "Wind exceeds C42 limits (>20 kt)" };
-      if (vis < 5000) return { safe: false, msg: "Visibility too low (<5000 m)" };
-      if (desc.toLowerCase().includes("rain")) return { safe: false, msg: "Rain not suitable for C42" };
-      if (cloudCover !== undefined && cloudCover > 80 && vis < 5000) {
-        return { safe: false, msg: "High cloud cover with low visibility — possible low cloud or fog" };
-      }
-      return { safe: true, msg: "" };
-    }
-  </script>
+    resDiv.innerHTML = `
+      <h3>Flight Weather Check for ${startTime.toUTCString().replace("UTC", "GMT")} to ${endTime.toUTCString().replace("UTC", "GMT")}</h3>
+      <pre>${messages.join("\n")}</pre>
+      ${overallStatus}
+    `;
+
+  } catch (e) {
+    resDiv.innerHTML = '<p class="bad">Error fetching weather data.</p>';
+  }
+}
+
+function predictRunway(windDir) {
+  const runways = { '04': 40, '22': 220, '10': 100, '28': 280 };
+  let best = Object.entries(runways).reduce((a, b) => {
+    const aDiff = Math.min(Math.abs(a[1] - windDir), 360 - Math.abs(a[1] - windDir));
+    const bDiff = Math.min(Math.abs(b[1] - windDir), 360 - Math.abs(b[1] - windDir));
+    return aDiff < bDiff ? a : b;
+  });
+  return best[0];
+}
+
+function checkLimits(wind, vis, desc, cloudCover) {
+  if (parseFloat(wind) > 20) return { safe: false, msg: "Wind exceeds C42 limits (>20 kt)" };
+  if (vis < 5000) return { safe: false, msg: "Visibility too low (<5000 m)" };
+  if (desc.toLowerCase().includes("rain")) return { safe: false, msg: "Rain not suitable for C42" };
+  if (cloudCover !== undefined && cloudCover > 80 && vis < 5000) {
+    return { safe: false, msg: "High cloud cover with low visibility — possible low cloud or fog" };
+  }
+  return { safe: true, msg: "" };
+}
+</script>
 </body>
 </html>
