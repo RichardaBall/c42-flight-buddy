@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>C42 Flight Buddy - CheckWX METAR</title>
+<title>C42 Flight Buddy</title>
 <style>
   body { font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; background: #f5f5f5; color: #333; }
   input, button { padding: 10px; margin: 5px 0; width: 100%; font-size: 1rem; }
@@ -13,9 +13,9 @@
 </style>
 </head>
 <body>
-<h1>C42 Flight Buddy - METAR via CheckWX</h1>
-<p><em>Version: 2025-07-01-06</em></p>
-<p>Check flight weather from Cardiff Airport (EGFH)</p>
+<h1>C42 Flight Buddy - CheckWX METAR</h1>
+<p><em>Version: 2025-07-01-04</em></p>
+<p>Check flight weather from Swansea Airport (EGFH)</p>
 
 <label for="start">Flight start (GMT):</label>
 <input type="datetime-local" id="start" />
@@ -28,7 +28,7 @@
 <div id="results"></div>
 
 <script>
-const elevationM = 295; // Airport elevation
+const elevationM = 295; // Swansea Airport elevation in meters
 const CHECKWX_API_KEY = '1716ac7499b0440ca6d984c09a569c8b';
 const ICAO = 'EGFH';
 
