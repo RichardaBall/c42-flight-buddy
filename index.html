@@ -31,9 +31,8 @@
 </style>
 </head>
 <body>
-<!-- C42 Flight Buddy version: 2025-07-01-02 -->
 <h1>C42 Flight Buddy</h1>
-<p><em>Version: 2025-07-01-02</em></p>
+<p><em>Version: 2025-07-01-03</em></p>
 <p>Check flight weather from Swansea Airport</p>
 
 <label for="start">Flight start (GMT):</label>
@@ -86,20 +85,31 @@ async function checkFlight() {
     const forecastResp = await fetch(`https://api.openweathermap.org/data/2.5/forecast?lat=${LAT}&lon=${LON}&appid=${API_KEY}&units=metric`);
     const forecastData = await forecastResp.json();
 
-    // Filter forecasts that start at or after flight start and before flight end
-    let relevantForecasts = forecastData.list.filter(item => {
+    // Find forecast interval containing flight start time (previous or equal start)
+    let previousInterval = null;
+    for (const item of forecastData.list) {
       const forecastStart = new Date(item.dt * 1000);
-      return forecastStart >= startTime && forecastStart <= endTime;
+      const forecastEnd = new Date(forecastStart.getTime() + 3 * 3600 * 1000);
+      if (forecastStart <= startTime && forecastEnd > startTime) {
+        previousInterval = item;
+        break;
+      }
+    }
+
+    // Include previous interval if found + any intervals overlapping flight window after startTime
+    let relevantForecasts = [];
+    if (previousInterval) relevantForecasts.push(previousInterval);
+
+    forecastData.list.forEach(item => {
+      const forecastStart = new Date(item.dt * 1000);
+      if (forecastStart > startTime && forecastStart < endTime) {
+        relevantForecasts.push(item);
+      }
     });
 
-    // If none found, get closest forecast (before or after)
     if (relevantForecasts.length === 0) {
-      const closest = forecastData.list.reduce((prev, curr) => {
-        const prevDiff = Math.abs(new Date(prev.dt * 1000) - startTime);
-        const currDiff = Math.abs(new Date(curr.dt * 1000) - startTime);
-        return currDiff < prevDiff ? curr : prev;
-      });
-      relevantForecasts.push(closest);
+      resDiv.innerHTML = '<p class="bad">No forecast data available for selected flight window.</p>';
+      return;
     }
 
     let issues = [];
