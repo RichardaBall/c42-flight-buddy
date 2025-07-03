@@ -29,11 +29,16 @@
     .ok { color: green; }
     .bad { color: red; }
     .highlight { color: red; }
+    #version {
+      text-align: right;
+      font-weight: bold;
+      margin-bottom: 10px;
+    }
   </style>
 </head>
 <body>
+  <div id="version">Version: 08</div>
   <h1>C42 Flight Buddy</h1>
-  <p><em>Version: 07</em></p>
   <p>Check flight weather from Swansea Airport</p>
 
   <label for="start">Flight start (GMT):</label>
@@ -50,7 +55,7 @@
 const LAT = 51.605;
 const LON = -4.064;
 const API_KEY = '81a0d8bef1288c6437560f89b336dd33';
-const elevation = 295; // meters
+const elevation = 295;
 
 function estimateDewPoint(temp, humidity) {
   return temp - ((100 - humidity) / 5);
@@ -70,6 +75,12 @@ function formatDateUK(d) {
   return `${dd}/${mm}/${yyyy} ${hh}:${min}:${ss} GMT`;
 }
 
+function getCurrentDateTimeLocal() {
+  const now = new Date();
+  now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+  return now.toISOString().slice(0, 16);
+}
+
 async function checkFlight() {
   const startInput = document.getElementById("start").value;
   const duration = parseFloat(document.getElementById("duration").value);
@@ -80,7 +91,7 @@ async function checkFlight() {
     return;
   }
 
-  const startTime = new Date(startInput + "Z"); // GMT
+  const startTime = new Date(startInput + "Z");
   const now = new Date();
   const maxForecastTime = new Date(now.getTime() + 5 * 24 * 60 * 60 * 1000);
   const endTime = new Date(startTime.getTime() + duration * 3600 * 1000);
@@ -104,6 +115,7 @@ async function checkFlight() {
         break;
       }
     }
+
     if (!previousInterval) {
       for (let item of data.list) {
         const forecastStart = new Date(item.dt * 1000);
@@ -156,20 +168,20 @@ async function checkFlight() {
       const gustKts = (gustSpeed * 1.94384).toFixed(1);
       const QFE = (pressure - (elevation * 0.12)).toFixed(1);
       const runway = predictRunway(windDeg);
-      const safe = checkLimits(windKts, gustKts, visibility, weatherDesc, cloudCover, cloudBase, temp);
-
-      const timeLabel = formatDateUK(new Date(item.dt * 1000));
-
-      // Icing possible check:
       const icingPossible = (temp >= -5 && temp <= 3) && (cloudCover > 50 || weatherDesc.toLowerCase().includes("rain")) ? "Yes" : "No";
 
-      // Compose message with only exceeded limits highlighted in red:
+      const safe = checkLimits(windKts, gustKts, visibility, weatherDesc, cloudCover, cloudBase, temp);
       const statusText = safe.safe ? "✅ OK" : `<span class="highlight">❌ ${safe.msg}</span>`;
+      const timeLabel = formatDateUK(new Date(item.dt * 1000));
+
+      if (!safe.safe) {
+        issues.push(`At ${timeLabel}: ${safe.msg}`);
+      }
 
       messages.push(
 `Time: ${timeLabel}
 Temperature: ${temp.toFixed(1)}°C
-Cloud base: ~${cloudBase} ft AGL
+Cloud base: ~${cloudBase < 1000 ? `<span class="highlight">${cloudBase} ft AGL</span>` : `${cloudBase} ft AGL`}
 QNH: ${pressure} hPa
 QFE: ${QFE} hPa
 Wind: ${windDeg}° @ ${windKts} kt (Gusts: ${gustKts} kt)
@@ -180,10 +192,6 @@ Predicted Runway: ${runway}
 Icing Possible: ${icingPossible}
 Status: ${statusText}`
       );
-
-      if (!safe.safe) {
-        issues.push(`At ${timeLabel}: ${safe.msg}`);
-      }
     });
 
     const overallStatus = issues.length === 0
@@ -194,7 +202,6 @@ Status: ${statusText}`
       <h3>Flight Weather Check for ${formatDateUK(startTime)} to ${formatDateUK(endTime)}</h3>
       <pre>${messages.join("\n\n")}</pre>
       ${overallStatus}
-      <p style="text-align:center; margin-top: 40px; font-weight:bold;">Version: 07</p>
     `;
 
   } catch (e) {
@@ -220,9 +227,15 @@ function checkLimits(wind, gust, vis, desc, cloudCover, cloudBase, temp) {
     return { safe: false, msg: "Fog or mist present — not suitable" };
   }
   if (cloudBase < 1000) return { safe: false, msg: "Estimated cloud base below 1000 ft AGL" };
-  // Optional: icing advisory could be flagged here but we just display separately
   return { safe: true, msg: "" };
 }
+
+// Auto-set datetime input and trigger check on page load
+window.onload = () => {
+  const startInput = document.getElementById("start");
+  startInput.value = getCurrentDateTimeLocal();
+  checkFlight();
+};
 </script>
 </body>
 </html>
