@@ -205,6 +205,9 @@ async function checkFlight(initStart, initDuration) {
 
       const rainClass = rainLevel === 'bad' ? 'bad' : rainLevel === 'warn' ? 'warn' : '';
 
+      // Visibility display
+      const visDisplay = visibility > 5000 ? '>5000 m' : visibility + ' m';
+
       messages.push(
 `${highlight("Time: ", timeLabel, false)}
 Temperature: ${temp.toFixed(1)}°C
@@ -213,7 +216,7 @@ QNH: ${pressure} hPa
 QFE: ${QFE} hPa
 ${highlight("Wind: ", windDeg + "° @ " + windKts + " kt", windKts > 20, "bad")}
 ${highlight("Gusts: ", gustKts + " kt", gustKts > 20, "bad")}
-${highlight("Visibility: ", visibility + " m", visibility < 5000, "bad")}
+${highlight("Visibility: ", visDisplay, visibility < 5000, "bad")}
 Cloud cover: ${cloudCover} %
 <span class="${rainClass} highlight">Weather: ${weatherDesc}</span>
 Icing Risk: ${icing === 'Risk' ? `<span class="bad highlight">${icing}</span>` : icing}
@@ -222,7 +225,6 @@ ${highlight("Status: ", safe.safe ? "✅ OK" : "❌ Limit Exceeded", !safe.safe,
       );
     });
 
-    // Show overall status simplified
     const anyBad = relevantForecasts.some(item => {
       const main = item.main || {};
       const wind = item.wind || {};
@@ -243,7 +245,6 @@ ${highlight("Status: ", safe.safe ? "✅ OK" : "❌ Limit Exceeded", !safe.safe,
       const gustKts = (gustSpeed * 1.94384).toFixed(1);
       const safe = checkLimits(windKts, gustKts, visibility, weatherDesc, cloudCover, cloudBase);
 
-      // Check rain level again for overall status
       const rainLevel = (() => {
         const descLower = weatherDesc.toLowerCase();
         if (!descLower.includes('rain')) return 'none';
@@ -272,18 +273,18 @@ ${highlight("Status: ", safe.safe ? "✅ OK" : "❌ Limit Exceeded", !safe.safe,
   }
 }
 
-// On page load, fill in current datetime (rounded to next 3-hour interval) and run checkFlight
 window.addEventListener('load', () => {
   const now = new Date();
-  // Round minutes and seconds down, then add hours to nearest 3-hour block ahead
   now.setUTCMinutes(0,0,0);
   const hour = now.getUTCHours();
-  const roundedHour = hour + (3 - (hour % 3)) % 3;
-  now.setUTCHours(roundedHour);
-  const isoLocal = now.toISOString().slice(0,16);
-  document.getElementById('start').value = isoLocal;
-  document.getElementById('duration').value = 1;
-  checkFlight(isoLocal, 1);
+  if (hour < 19) {
+    now.setUTCHours(19);
+  } else {
+    now.setUTCDate(now.getUTCDate() + 1);
+    now.setUTCHours(19);
+  }
+  const isoString = now.toISOString().slice(0,16);
+  document.getElementById("start").value = isoString;
 });
 </script>
 </body>
