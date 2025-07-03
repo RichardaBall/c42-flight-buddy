@@ -37,7 +37,7 @@
 </head>
 <body>
   <h1>C42 Flight Buddy</h1>
-  <p><em>Version: 2025-07-03-01</em></p>
+  <p><em>Version: 18</em></p>
   <p>Check flight weather from Swansea Airport</p>
 
   <label for="start">Flight start (GMT):</label>
@@ -90,58 +90,9 @@ function checkLimits(wind, gusts, vis, desc, cloudCover, cloudBase) {
   return { safe: true, msg: "" };
 }
 
-// More precise icing risk:
-// Icing likely if temp between -10°C and +3°C and dew point close (diff < 3°C)
 function icingRisk(temp, dewPoint) {
-  if (temp <= 3 && temp >= -10 && Math.abs(temp - dewPoint) < 3) return "Risk";
+  if (temp <= 5 && temp >= -5 && Math.abs(temp - dewPoint) < 2) return "Risk";
   return "Low";
-}
-
-// Turbulence risk mapping and color coding
-function turbulenceRiskClass(risk) {
-  switch (risk.toLowerCase()) {
-    case "none": return { text: "None", cls: "" }; // normal text
-    case "light": return { text: "Light", cls: "ok" }; // green
-    case "moderate": return { text: "Moderate", cls: "warn" }; // amber
-    case "high": return { text: "High", cls: "bad" }; // red
-    default: return { text: risk, cls: "" };
-  }
-}
-
-// Wind shear risk mapping, same color coding as turbulence
-function windShearRiskClass(risk) {
-  switch (risk.toLowerCase()) {
-    case "none":
-    case "none detected":
-      return { text: "None", cls: "" }; // normal text
-    case "light":
-      return { text: "Light", cls: "ok" }; // green
-    case "moderate":
-      return { text: "Moderate", cls: "warn" }; // amber
-    case "high":
-      return { text: "High", cls: "bad" }; // red
-    default:
-      return { text: risk, cls: "" };
-  }
-}
-
-// Simplified turbulence prediction based on gusts and wind variability
-function predictTurbulence(gusts, windSpeed) {
-  if (gusts < 5) return "None";
-  if (gusts < 12) return "Light";
-  if (gusts < 20) return "Moderate";
-  return "High";
-}
-
-// Simplified wind shear prediction: if wind direction changes sharply between intervals or gusts very high
-function predictWindShear(currentWindDeg, prevWindDeg, gusts) {
-  if (gusts >= 20) return "High";
-  if (prevWindDeg === null) return "None";
-  const diff = Math.abs(currentWindDeg - prevWindDeg);
-  const angleDiff = diff > 180 ? 360 - diff : diff;
-  if (angleDiff > 40 && gusts > 10) return "Moderate";
-  if (angleDiff > 20 && gusts > 5) return "Light";
-  return "None";
 }
 
 function formatUKDate(d) {
@@ -176,7 +127,6 @@ async function checkFlight(initStart, initDuration) {
     const response = await fetch(`https://api.openweathermap.org/data/2.5/forecast?lat=${LAT}&lon=${LON}&appid=${API_KEY}&units=metric`);
     const data = await response.json();
 
-    // Find interval at or just before startTime
     let previousInterval = null;
     for (let i = data.list.length - 1; i >= 0; i--) {
       const forecastStart = new Date(data.list[i].dt * 1000);
@@ -200,7 +150,6 @@ async function checkFlight(initStart, initDuration) {
       return;
     }
 
-    // Collect all forecasts in flight window
     let relevantForecasts = [previousInterval];
     data.list.forEach(item => {
       const forecastStart = new Date(item.dt * 1000);
@@ -215,7 +164,6 @@ async function checkFlight(initStart, initDuration) {
     }
 
     let messages = [];
-    let prevWindDeg = null;
 
     relevantForecasts.forEach(item => {
       const main = item.main || {};
@@ -241,17 +189,11 @@ async function checkFlight(initStart, initDuration) {
       const safe = checkLimits(windKts, gustKts, visibility, weatherDesc, cloudCover, cloudBase);
       const icing = icingRisk(temp, dewPoint);
 
-      // Turbulence risk and color
-      const turbRisk = predictTurbulence(gustKts, windKts);
-      const turbRiskClass = turbulenceRiskClass(turbRisk);
+      let visClass = "";
+      if (visibility < 3000) visClass = "bad";
+      else if (visibility < 5000) visClass = "warn";
 
-      // Wind shear risk on predicted runway
-      const wsRisk = predictWindShear(windDeg, prevWindDeg, gustKts);
-      const wsRiskClass = windShearRiskClass(wsRisk);
-
-      prevWindDeg = windDeg;
-
-      const timeLabel = formatUKDate(new Date(item.dt * 1000));
+      const visDisplay = visibility > 5000 ? '>5000 m' : `<span class="${visClass} highlight">${visibility} m</span>`;
 
       const rainLevel = (() => {
         const descLower = weatherDesc.toLowerCase();
@@ -262,22 +204,18 @@ async function checkFlight(initStart, initDuration) {
 
       const rainClass = rainLevel === 'bad' ? 'bad' : rainLevel === 'warn' ? 'warn' : '';
 
-      const visDisplay = visibility > 5000 ? '>5000 m' : visibility + ' m';
-
       messages.push(
-`${"Time: " + timeLabel}
+`${"Time: " + formatUKDate(new Date(item.dt * 1000))}
 Temperature: ${temp.toFixed(1)}°C
 ${highlight("Cloud base: ~", cloudBase + " ft AGL", cloudBase < 1000, "bad")}
 QNH: ${pressure} hPa
 QFE: ${QFE} hPa
 ${highlight("Wind: ", windDeg + "° @ " + windKts + " kt", windKts > 20, "bad")}
 ${highlight("Gusts: ", gustKts + " kt", gustKts > 20, "bad")}
-${highlight("Visibility: ", visDisplay, visibility < 5000, "bad")}
+Visibility: ${visDisplay}
 Cloud cover: ${cloudCover} %
 Weather: <span class="${rainClass} highlight">${weatherDesc}</span>
 Icing Risk: ${icing === 'Risk' ? `<span class="bad highlight">${icing}</span>` : icing}
-Turbulence Risk: <span class="${turbRiskClass.cls} highlight">${turbRiskClass.text}</span>
-Wind Shear Risk: <span class="${wsRiskClass.cls} highlight">${wsRiskClass.text}</span>
 Predicted Runway: ${runway}
 ${highlight("Status: ", safe.safe ? "✅ OK" : "❌ Limit Exceeded", !safe.safe, "bad")}\n`
       );
