@@ -28,13 +28,13 @@
     }
     .ok { color: green; }
     .bad { color: red; }
-    .warn { color: goldenrod; }
-    .highlight { color: red; }
+    .warn { color: orange; }
+    .highlight { font-weight: bold; }
   </style>
 </head>
 <body>
   <h1>C42 Flight Buddy</h1>
-  <p><em>Version: 2025-07-03-10</em></p>
+  <p><em>Version: 2025-07-03-11</em></p>
   <p>Check flight weather from Swansea Airport</p>
 
   <label for="start">Flight start (GMT):</label>
@@ -61,47 +61,71 @@ function estimateCloudBase(temp, dewPoint) {
   return Math.round((temp - dewPoint) * 400);
 }
 
-function icingRisk(temp, cloudCover, desc) {
-  const risky = temp <= 3 && cloudCover > 40 && /rain|drizzle/i.test(desc);
-  return risky ? 'Risk' : 'Low';
-}
-
-function formatDateUK(date) {
+function formatUKDate(date) {
   return date.toLocaleString('en-GB', {
-    weekday: 'short', year: 'numeric', month: 'short',
-    day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'UTC'
+    weekday: 'short', day: '2-digit', month: 'short',
+    year: 'numeric', hour: '2-digit', minute: '2-digit',
+    hour12: false, timeZone: 'UTC'
   }) + ' GMT';
 }
 
-function rainWarning(desc, cloudCover) {
-  if (!/rain/i.test(desc)) return { level: 'none', msg: '' };
-  if (/light rain/i.test(desc) && cloudCover <= 50) return { level: 'warn', msg: 'Light rain with low cloud cover' };
+function predictRunway(windDir) {
+  const runways = { '04': 40, '22': 220, '10': 100, '28': 280 };
+  return Object.entries(runways).reduce((a, b) => {
+    const aDiff = Math.min(Math.abs(a[1] - windDir), 360 - Math.abs(a[1] - windDir));
+    const bDiff = Math.min(Math.abs(b[1] - windDir), 360 - Math.abs(b[1] - windDir));
+    return aDiff < bDiff ? a : b;
+  })[0];
+}
+
+function getRainWarning(desc, cloudCover) {
+  desc = desc.toLowerCase();
+  if (!desc.includes('rain')) return { level: 'none', msg: 'No rain' };
+  if (desc.includes('light') && cloudCover < 100) return { level: 'warn', msg: 'Light rain with low cloud — use caution' };
   return { level: 'bad', msg: 'Rain not suitable for C42' };
 }
 
+function getIcingRisk(temp) {
+  return temp <= 3 ? 'Risk' : 'Low';
+}
+
+function checkLimits(windKts, gustKts, vis, desc, cloudCover, cloudBase, temp) {
+  if (parseFloat(windKts) > 20) return { safe: false, msg: "Wind exceeds C42 limits (>20 kt)" };
+  if (parseFloat(gustKts) > 20) return { safe: false, msg: "Gust exceeds C42 limits (>20 kt)" };
+  if (vis < 5000) return { safe: false, msg: "Visibility too low (<5000 m)" };
+  if (desc.toLowerCase().includes("fog") || desc.toLowerCase().includes("mist")) {
+    return { safe: false, msg: "Fog or mist present — not suitable" };
+  }
+  if (cloudBase < 1000) return { safe: false, msg: "Estimated cloud base below 1000 ft AGL" };
+  const rain = getRainWarning(desc, cloudCover);
+  if (rain.level === 'bad') return { safe: false, msg: rain.msg };
+  return { safe: true, msg: "" };
+}
+
 async function checkFlight(auto = false) {
-  const startInput = document.getElementById("start").value;
+  const startInputField = document.getElementById("start");
   const duration = parseFloat(document.getElementById("duration").value);
   const resDiv = document.getElementById("results");
 
-  const now = new Date();
-  let startTime;
-
-  if (!startInput && auto) {
-    startTime = new Date(now);
-    document.getElementById("start").value = startTime.toISOString().slice(0,16);
-  } else {
-    if (!startInput || isNaN(duration) || duration <= 0) {
-      resDiv.innerHTML = '<p class="bad">Please enter a valid start time and duration.</p>';
-      return;
-    }
-    startTime = new Date(startInput + "Z");
+  if (auto && !startInputField.value) {
+    const now = new Date();
+    now.setMinutes(0, 0, 0);
+    const iso = now.toISOString().slice(0, 16);
+    startInputField.value = iso;
   }
 
-  const endTime = new Date(startTime.getTime() + duration * 3600 * 1000);
-  const maxForecastTime = new Date(now.getTime() + 5 * 24 * 60 * 60 * 1000);
+  const startInput = startInputField.value;
+  if (!startInput || isNaN(duration) || duration <= 0) {
+    resDiv.innerHTML = '<p class="bad">Please enter a valid start time and duration.</p>';
+    return;
+  }
 
-  if (startTime <= now || startTime > maxForecastTime || endTime > maxForecastTime) {
+  const startTime = new Date(startInput + "Z");
+  const now = new Date();
+  const maxForecastTime = new Date(now.getTime() + 5 * 24 * 60 * 60 * 1000);
+  const endTime = new Date(startTime.getTime() + duration * 3600 * 1000);
+
+  if (!auto && (startTime <= now || startTime > maxForecastTime || endTime > maxForecastTime)) {
     resDiv.innerHTML = '<p class="bad">Please enter a valid start time and duration within the next 5 days.</p>';
     return;
   }
@@ -162,7 +186,7 @@ async function checkFlight(auto = false) {
       const temp = main.temp || 0;
       const windDeg = wind.deg || 0;
       const windSpeed = wind.speed || 0;
-      const windGust = wind.gust || 0;
+      const gust = wind.gust || 0;
       const visibility = item.visibility !== undefined ? item.visibility : 10000;
       const cloudCover = clouds.all || 0;
       const weatherDesc = weatherArr.length ? weatherArr[0].description : "unknown";
@@ -170,36 +194,35 @@ async function checkFlight(auto = false) {
       const dewPoint = estimateDewPoint(temp, humidity);
       const cloudBase = estimateCloudBase(temp, dewPoint);
       const windKts = (windSpeed * 1.94384).toFixed(1);
-      const gustKts = (windGust * 1.94384).toFixed(1);
+      const gustKts = (gust * 1.94384).toFixed(1);
       const QFE = (pressure - (elevation * 0.12)).toFixed(1);
       const runway = predictRunway(windDeg);
-      const icing = icingRisk(temp, cloudCover, weatherDesc);
-      const rain = rainWarning(weatherDesc, cloudCover);
-      const timeLabel = formatDateUK(new Date(item.dt * 1000));
+      const icing = getIcingRisk(temp);
+      const rain = getRainWarning(weatherDesc, cloudCover);
+      const safe = checkLimits(windKts, gustKts, visibility, weatherDesc, cloudCover, cloudBase, temp);
+      const timeLabel = formatUKDate(new Date(item.dt * 1000));
 
-      const limits = checkLimits(windKts, gustKts, visibility, weatherDesc, cloudCover, cloudBase);
-      const highlight = (val, exceeded) => exceeded ? `<span class="highlight">${val}</span>` : val;
-      const warn = (val, warnClass) => warnClass === 'warn' ? `<span class="warn">${val}</span>` : highlight(val, warnClass === 'bad');
+      const highlight = (label, val, cond, cls) => cond ? `<span class="${cls} highlight">${label}${val}</span>` : `${label}${val}`;
 
       messages.push(
-`Time: ${timeLabel}
-Temperature: ${temp.toFixed(1)}°C
-Cloud base: ~${highlight(`${cloudBase} ft AGL`, cloudBase < 1000)}
-QNH: ${pressure} hPa
-QFE: ${QFE} hPa
-Wind: ${windDeg}° @ ${highlight(`${windKts} kt`, parseFloat(windKts) > 20)} (Gusts: ${highlight(`${gustKts} kt`, parseFloat(gustKts) > 20)})
-Visibility: ${highlight(`${visibility} m`, visibility < 5000)}
-Cloud cover: ${cloudCover} %
-Weather: ${warn(weatherDesc, rain.level)}
-Predicted Runway: ${runway}
-Icing Risk: ${highlight(icing, icing === 'Risk')}
-Status: ${limits.safe ? "✅ OK" : "❌ Limit Exceeded"}\n`
+`${highlight("Time: ", timeLabel, false)}
+${highlight("Temperature: ", temp.toFixed(1) + "°C", false)}
+${highlight("Cloud base: ~", cloudBase + " ft AGL", cloudBase < 1000, "bad")}
+${highlight("QNH: ", pressure + " hPa", false)}
+${highlight("QFE: ", QFE + " hPa", false)}
+${highlight("Wind: ", windDeg + "° @ " + windKts + " kt", windKts > 20, "bad")}
+${highlight("Gusts: ", gustKts + " kt", gustKts > 20, "bad")}
+${highlight("Visibility: ", visibility + " m", visibility < 5000, "bad")}
+${highlight("Cloud cover: ", cloudCover + " %", false)}
+${highlight("Weather: ", weatherDesc, rain.level === 'bad', "bad")}${rain.level === 'warn' ? `\n${highlight("Note: ", rain.msg, true, "warn")}` : ""}
+${highlight("Icing Risk: ", icing, icing === 'Risk', "bad")}
+${highlight("Predicted Runway: ", runway, false)}
+${highlight("Status: ", safe.safe ? "✅ OK" : "❌ Limit Exceeded", !safe.safe, "bad")}\n`
       );
 
-      if (!limits.safe) issues.push(`At ${timeLabel}: ${limits.msg}`);
-      if (rain.level === 'warn') issues.push(`At ${timeLabel}: ${rain.msg}`);
-      if (rain.level === 'bad') issues.push(`At ${timeLabel}: ${rain.msg}`);
-      if (icing === 'Risk') issues.push(`At ${timeLabel}: Icing conditions possible`);
+      if (!safe.safe) {
+        issues.push(`At ${timeLabel}: ${safe.msg}`);
+      }
     });
 
     const overallStatus = issues.length === 0
@@ -207,7 +230,7 @@ Status: ${limits.safe ? "✅ OK" : "❌ Limit Exceeded"}\n`
       : `<p class="bad"><strong>❌ Weather issues detected during flight:</strong><br>${issues.join("<br>")}</p>`;
 
     resDiv.innerHTML = `
-      <h3>Flight Weather Check for ${formatDateUK(startTime)} to ${formatDateUK(endTime)}</h3>
+      <h3>Flight Weather Check for ${formatUKDate(startTime)} to ${formatUKDate(endTime)}</h3>
       <pre>${messages.join("\n")}</pre>
       ${overallStatus}
     `;
@@ -217,27 +240,9 @@ Status: ${limits.safe ? "✅ OK" : "❌ Limit Exceeded"}\n`
   }
 }
 
-function predictRunway(windDir) {
-  const runways = { '04': 40, '22': 220, '10': 100, '28': 280 };
-  return Object.entries(runways).reduce((a, b) => {
-    const aDiff = Math.min(Math.abs(a[1] - windDir), 360 - Math.abs(a[1] - windDir));
-    const bDiff = Math.min(Math.abs(b[1] - windDir), 360 - Math.abs(b[1] - windDir));
-    return aDiff < bDiff ? a : b;
-  })[0];
-}
-
-function checkLimits(wind, gust, vis, desc, cloudCover, cloudBase) {
-  if (parseFloat(wind) > 20) return { safe: false, msg: "Wind exceeds C42 limits (>20 kt)" };
-  if (parseFloat(gust) > 20) return { safe: false, msg: "Gusts exceed C42 limits (>20 kt)" };
-  if (vis < 5000) return { safe: false, msg: "Visibility too low (<5000 m)" };
-  if (desc.toLowerCase().includes("fog") || desc.toLowerCase().includes("mist")) {
-    return { safe: false, msg: "Fog or mist present — not suitable" };
-  }
-  if (cloudBase < 1000) return { safe: false, msg: "Estimated cloud base below 1000 ft AGL" };
-  return { safe: true, msg: "" };
-}
-
-window.onload = () => checkFlight(true);
+window.onload = () => {
+  checkFlight(true);
+};
 </script>
 </body>
 </html>
