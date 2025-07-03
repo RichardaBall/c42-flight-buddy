@@ -25,16 +25,19 @@
       background: #fff;
       border-radius: 5px;
       white-space: pre-wrap;
+      font-weight: normal;
     }
     .ok { color: green; }
     .bad { color: red; }
     .warn { color: orange; }
-    .highlight { font-weight: bold; }
+    .highlight {
+      font-weight: normal;
+    }
   </style>
 </head>
 <body>
   <h1>C42 Flight Buddy</h1>
-  <p><em>Version: 2025-07-01-12</em></p>
+  <p><em>Version: 2025-07-01-13</em></p>
   <p>Check flight weather from Swansea Airport</p>
 
   <label for="start">Flight start (GMT):</label>
@@ -88,13 +91,11 @@ function checkLimits(wind, gusts, vis, desc, cloudCover, cloudBase) {
 }
 
 function icingRisk(temp, dewPoint) {
-  // Simple risk check: icing possible if temp between -5 and +5 and dewPoint close
   if (temp <= 5 && temp >= -5 && Math.abs(temp - dewPoint) < 2) return "Risk";
   return "Low";
 }
 
 function formatUKDate(d) {
-  // Sat, 05 Jul 2025, 18:00 GMT
   const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
   const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   return `${days[d.getUTCDay()]}, ${String(d.getUTCDate()).padStart(2,'0')} ${months[d.getUTCMonth()]} ${d.getUTCFullYear()}, ${String(d.getUTCHours()).padStart(2,'0')}:${String(d.getUTCMinutes()).padStart(2,'0')} GMT`;
@@ -126,7 +127,6 @@ async function checkFlight(initStart, initDuration) {
     const response = await fetch(`https://api.openweathermap.org/data/2.5/forecast?lat=${LAT}&lon=${LON}&appid=${API_KEY}&units=metric`);
     const data = await response.json();
 
-    // Find forecast interval closest before or at startTime
     let previousInterval = null;
     for (let i = data.list.length - 1; i >= 0; i--) {
       const forecastStart = new Date(data.list[i].dt * 1000);
@@ -150,7 +150,6 @@ async function checkFlight(initStart, initDuration) {
       return;
     }
 
-    // Collect relevant forecasts for entire flight duration
     let relevantForecasts = [previousInterval];
     data.list.forEach(item => {
       const forecastStart = new Date(item.dt * 1000);
@@ -192,10 +191,6 @@ async function checkFlight(initStart, initDuration) {
 
       const timeLabel = formatUKDate(new Date(item.dt * 1000));
 
-      // Rain warning logic:
-      // No rain: normal
-      // Light rain & cloud cover < 99%: warn (orange)
-      // Anything else with rain & cloud cover >= 99%: bad (red)
       const rainLevel = (() => {
         const descLower = weatherDesc.toLowerCase();
         if (!descLower.includes('rain')) return 'none';
@@ -205,11 +200,10 @@ async function checkFlight(initStart, initDuration) {
 
       const rainClass = rainLevel === 'bad' ? 'bad' : rainLevel === 'warn' ? 'warn' : '';
 
-      // Visibility display
       const visDisplay = visibility > 5000 ? '>5000 m' : visibility + ' m';
 
       messages.push(
-`${highlight("Time: ", timeLabel, false)}
+`${"Time: " + timeLabel}
 Temperature: ${temp.toFixed(1)}°C
 ${highlight("Cloud base: ~", cloudBase + " ft AGL", cloudBase < 1000, "bad")}
 QNH: ${pressure} hPa
@@ -218,7 +212,7 @@ ${highlight("Wind: ", windDeg + "° @ " + windKts + " kt", windKts > 20, "bad")}
 ${highlight("Gusts: ", gustKts + " kt", gustKts > 20, "bad")}
 ${highlight("Visibility: ", visDisplay, visibility < 5000, "bad")}
 Cloud cover: ${cloudCover} %
-<span class="${rainClass} highlight">Weather: ${weatherDesc}</span>
+Weather: <span class="${rainClass} highlight">${weatherDesc}</span>
 Icing Risk: ${icing === 'Risk' ? `<span class="bad highlight">${icing}</span>` : icing}
 Predicted Runway: ${runway}
 ${highlight("Status: ", safe.safe ? "✅ OK" : "❌ Limit Exceeded", !safe.safe, "bad")}\n`
@@ -275,15 +269,11 @@ ${highlight("Status: ", safe.safe ? "✅ OK" : "❌ Limit Exceeded", !safe.safe,
 window.addEventListener('load', () => {
   const now = new Date();
   now.setUTCMinutes(0,0,0);
-  const hour = now.getUTCHours();
-  if (hour < 19) {
-    now.setUTCHours(19);
-  } else {
-    now.setUTCDate(now.getUTCDate() + 1);
-    now.setUTCHours(19);
-  }
+  now.setUTCHours(now.getUTCHours() + 1); // default flight start one hour from now
   const isoString = now.toISOString().slice(0,16);
   document.getElementById("start").value = isoString;
+  document.getElementById("duration").value = 1;
+  checkFlight(isoString, 1);
 });
 </script>
 </body>
