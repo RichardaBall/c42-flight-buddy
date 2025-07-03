@@ -38,7 +38,7 @@
 </head>
 <body>
   <h1>C42 Flight Buddy</h1>
-  <p><em>Version: 22</em></p>
+  <p><em>Version: 19</em></p>
   <p>Check flight weather from Swansea Airport</p>
 
   <label for="start">Flight start (GMT):</label>
@@ -113,78 +113,6 @@ function formatUKDate(d) {
   const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
   const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   return `${days[d.getUTCDay()]}, ${String(d.getUTCDate()).padStart(2,'0')} ${months[d.getUTCMonth()]} ${d.getUTCFullYear()}, ${String(d.getUTCHours()).padStart(2,'0')}:${String(d.getUTCMinutes()).padStart(2,'0')} GMT`;
-}
-
-// Daylight calculation using JS sunrise/sunset formula
-// Source: NOAA Solar Calculator simplified (approximate)
-function getSunTimes(date, lat, lon) {
-  // date is a Date object in UTC
-  const rad = Math.PI / 180;
-  const dayMs = 1000*60*60*24;
-  const J1970 = 2440588; // Julian date at Unix epoch
-  const J2000 = 2451545; // Julian date at 2000-01-01 12:00 UTC
-
-  function toJulian(date) {
-    return date.getTime() / dayMs - 0.5 + J1970;
-  }
-  function fromJulian(j) {
-    return new Date((j + 0.5 - J1970) * dayMs);
-  }
-  function solarMeanAnomaly(d) {
-    return rad * (357.5291 + 0.98560028 * d);
-  }
-  function eclipticLongitude(M) {
-    const C = rad * (1.9148 * Math.sin(M) + 0.02 * Math.sin(2*M) + 0.0003 * Math.sin(3*M));
-    const P = rad * 102.9372; // perihelion of the Earth
-    return M + C + P + Math.PI;
-  }
-  function declination(L) {
-    return Math.asin(Math.sin(L) * Math.sin(rad * 23.4397));
-  }
-  function hourAngle(lat, decl, altitude = -0.83) {
-    // altitude in degrees, -0.83 for sunrise/sunset (refraction + sun disc)
-    const h = (altitude * rad);
-    return Math.acos((Math.sin(h) - Math.sin(lat*rad)*Math.sin(decl)) / (Math.cos(lat*rad)*Math.cos(decl)));
-  }
-
-  const JDate = toJulian(date);
-  const d = JDate - J2000;
-  const M = solarMeanAnomaly(d);
-  const L = eclipticLongitude(M);
-  const dec = declination(L);
-  const H = hourAngle(lat, dec);
-
-  const Jnoon = J2000 + d - (lon / 360);
-  const Jset = Jnoon + (H / (2 * Math.PI));
-  const Jrise = Jnoon - (H / (2 * Math.PI));
-
-  return {
-    sunrise: fromJulian(Jrise),
-    sunset: fromJulian(Jset)
-  };
-}
-
-// Check if any part of flight is outside daylight (sunrise-sunset)
-function checkDaylight(startTime, endTime) {
-  // Flights spanning multiple days handled day-by-day
-  let currentDay = new Date(Date.UTC(startTime.getUTCFullYear(), startTime.getUTCMonth(), startTime.getUTCDate()));
-  const endDay = new Date(Date.UTC(endTime.getUTCFullYear(), endTime.getUTCMonth(), endTime.getUTCDate()));
-  while (currentDay <= endDay) {
-    const { sunrise, sunset } = getSunTimes(currentDay, LAT, LON);
-
-    // Flight segment on this day:
-    let segmentStart = (currentDay.getTime() === Date.UTC(startTime.getUTCFullYear(), startTime.getUTCMonth(), startTime.getUTCDate()))
-      ? startTime : currentDay;
-    let segmentEnd = (currentDay.getTime() === Date.UTC(endTime.getUTCFullYear(), endTime.getUTCMonth(), endTime.getUTCDate()))
-      ? endTime : new Date(currentDay.getTime() + 24*60*60*1000 - 1);
-
-    // Outside daylight if segment starts before sunrise or ends after sunset
-    if (segmentStart < sunrise || segmentEnd > sunset) {
-      return `<p class="warn"><strong>⚠️ Part of this flight is outside daylight hours (sunrise: ${sunrise.toUTCString()}, sunset: ${sunset.toUTCString()})</strong></p>`;
-    }
-    currentDay = new Date(currentDay.getTime() + 24*60*60*1000);
-  }
-  return '';
 }
 
 async function checkFlight() {
@@ -288,38 +216,82 @@ async function checkFlight() {
 
       messages.push(
 `${"Time: " + formatUKDate(new Date(item.dt * 1000))}
-Wind: ${highlight("", `${windKts} kt`, windKts > 20)} gusts: ${highlight("", `${gustKts} kt`, gustKts > 20)}
-Direction: ${windDeg}° Runway: ${runway}
-Visibility: ${visDisplay}
-Rain: <span class="${rainClass} highlight">${weatherDesc}</span>
-Cloud cover: ${highlight("", cloudCover + "%", cloudCover > 99)}
-Cloud base: ${highlight("", cloudBase + " ft AGL", cloudBase < 1000)}
+Temperature: ${temp.toFixed(1)}°C
+${highlight("Cloud base: ~", cloudBase + " ft AGL", cloudBase < 1000, "bad")}
+QNH: ${pressure} hPa
 QFE: ${QFE} hPa
-Icing risk: ${icing === "Risk" ? '<span class="warn highlight">Risk</span>' : "Low"}
-Wind shear: <span class="${shear.class} highlight">${shear.level}</span>
-Turbulence: <span class="${turb.class} highlight">${turb.level}</span>
-${safe.safe ? '<span class="ok">Flight conditions OK</span>' : `<span class="bad">${safe.msg}</span>`}`
+${highlight("Wind: ", windDeg + "° @ " + windKts + " kt", windKts > 20)}
+${highlight("Gusts: ", gustKts + " kt", gustKts > 20)}
+Visibility: ${visDisplay}
+Cloud cover: ${cloudCover} %
+Weather: <span class="${rainClass} highlight">${weatherDesc}</span>
+Icing Risk: ${icing === 'Risk' ? `<span class="bad highlight">${icing}</span>` : icing}
+Wind Shear Risk: <span class="${shear.class}">${shear.level}</span>
+Turbulence Risk: <span class="${turb.class}">${turb.level}</span>
+Predicted Runway: ${runway}
+${highlight("Status: ", safe.safe ? "✅ OK" : "❌ Limit Exceeded", !safe.safe)}\n`
       );
     });
 
-    const daylightWarning = checkDaylight(startTime, endTime);
+    const anyBad = relevantForecasts.some(item => {
+      const main = item.main || {};
+      const wind = item.wind || {};
+      const weatherArr = item.weather || [];
+      const clouds = item.clouds || {};
+      const pressure = main.pressure || 0;
+      const humidity = main.humidity || 0;
+      const temp = main.temp || 0;
+      const windSpeed = wind.speed || 0;
+      const gustSpeed = wind.gust || 0;
+      const visibility = item.visibility !== undefined ? item.visibility : 10000;
+      const cloudCover = clouds.all || 0;
+      const weatherDesc = weatherArr.length ? weatherArr[0].description : "unknown";
 
-    let overallStatus = '<p class="ok"><strong>✅ Flight conditions look good.</strong></p>';
-    if (messages.some(m => m.includes('bad'))) {
-      overallStatus = '<p class="bad"><strong>❌ Some flight conditions are not suitable.</strong></p>';
-    } else if (messages.some(m => m.includes('warn'))) {
-      overallStatus = '<p class="warn"><strong>⚠️ Some flight conditions have warnings.</strong></p>';
-    }
+      const dewPoint = estimateDewPoint(temp, humidity);
+      const cloudBase = estimateCloudBase(temp, dewPoint);
+      const windKts = (windSpeed * 1.94384).toFixed(1);
+      const gustKts = (gustSpeed * 1.94384).toFixed(1);
+      const safe = checkLimits(windKts, gustKts, visibility, weatherDesc, cloudCover, cloudBase);
 
-    resDiv.innerHTML = daylightWarning + overallStatus + messages.join('\n\n');
+      const rainLevel = (() => {
+        const descLower = weatherDesc.toLowerCase();
+        if (!descLower.includes('rain')) return 'none';
+        if (descLower.includes('light') && cloudCover < 99) return 'warn';
+        return 'bad';
+      })();
 
-  } catch (err) {
-    resDiv.innerHTML = `<p class="bad">Error fetching weather data: ${err.message}</p>`;
+      if (!safe.safe) return true;
+      if (rainLevel === 'bad') return true;
+      return false;
+    });
+
+    const overallStatus = anyBad
+      ? '<p class="bad"><strong>❌ Weather issues detected during flight.</strong></p>'
+      : '<p class="ok"><strong>✅ Weather suitable for full flight duration.</strong></p>';
+
+    resDiv.innerHTML = `
+      <h3>Flight Weather Check for ${formatUKDate(startTime)} to ${formatUKDate(endTime)}</h3>
+      <pre>${messages.join("\n")}</pre>
+      ${overallStatus}
+    `;
+
+  } catch (e) {
+    resDiv.innerHTML = '<p class="bad">Error fetching weather data.</p>';
   }
 }
 
+window.addEventListener('load', () => {
+  const now = new Date();
+  now.setUTCMinutes(0,0,0);
+  now.setUTCHours(now.getUTCHours() + 1);
+  const isoString = now.toISOString().slice(0,16);
+  document.getElementById("start").value = isoString;
+  document.getElementById("duration").value = 1;
+  checkFlight();
+});
+
 document.getElementById("start").addEventListener("change", checkFlight);
-document.getElementById("duration").addEventListener("change", checkFlight);
+document.getElementById("duration").addEventListener("input", checkFlight);
 </script>
 </body>
 </html>
