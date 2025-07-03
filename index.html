@@ -54,14 +54,14 @@
 const LAT = 51.605;
 const LON = -4.064;
 const API_KEY = '81a0d8bef1288c6437560f89b336dd33';
-const elevation = 295; // meters
+const elevation = 295;
 
 function estimateDewPoint(temp, humidity) {
   return temp - ((100 - humidity) / 5);
 }
 
 function estimateCloudBase(temp, dewPoint) {
-  return Math.round((temp - dewPoint) * 400); // in feet AGL
+  return Math.round((temp - dewPoint) * 400);
 }
 
 function highlight(label, value, condition, cls="bad") {
@@ -95,6 +95,14 @@ function icingRisk(temp, dewPoint) {
   return "Low";
 }
 
+function shearRisk(windKts, gustKts) {
+  return (gustKts - windKts) >= 10 ? "⚠️ Possible Wind Shear" : "None";
+}
+
+function turbulenceRisk(gustKts) {
+  return gustKts >= 15 ? "⚠️ Turbulence Risk" : "Low";
+}
+
 function formatUKDate(d) {
   const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
   const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -111,7 +119,7 @@ async function checkFlight(initStart, initDuration) {
     return;
   }
 
-  const startTime = new Date(startInput + "Z"); // GMT
+  const startTime = new Date(startInput + "Z");
   const now = new Date();
   const maxForecastTime = new Date(now.getTime() + 5 * 24 * 60 * 60 * 1000);
   const endTime = new Date(startTime.getTime() + duration * 3600 * 1000);
@@ -158,11 +166,6 @@ async function checkFlight(initStart, initDuration) {
       }
     });
 
-    if (relevantForecasts.length === 0) {
-      resDiv.innerHTML = '<p class="bad">No forecast data available for selected flight window.</p>';
-      return;
-    }
-
     let messages = [];
 
     relevantForecasts.forEach(item => {
@@ -175,19 +178,21 @@ async function checkFlight(initStart, initDuration) {
       const temp = main.temp || 0;
       const windDeg = wind.deg || 0;
       const windSpeed = wind.speed || 0;
+      const gustSpeed = wind.gust || 0;
       const visibility = item.visibility !== undefined ? item.visibility : 10000;
       const cloudCover = clouds.all || 0;
       const weatherDesc = weatherArr.length ? weatherArr[0].description : "unknown";
-      const gustSpeed = wind.gust || 0;
 
       const dewPoint = estimateDewPoint(temp, humidity);
       const cloudBase = estimateCloudBase(temp, dewPoint);
-      const windKts = (windSpeed * 1.94384).toFixed(1);
-      const gustKts = (gustSpeed * 1.94384).toFixed(1);
+      const windKts = +(windSpeed * 1.94384).toFixed(1);
+      const gustKts = +(gustSpeed * 1.94384).toFixed(1);
       const QFE = (pressure - (elevation * 0.12)).toFixed(1);
       const runway = predictRunway(windDeg);
       const safe = checkLimits(windKts, gustKts, visibility, weatherDesc, cloudCover, cloudBase);
       const icing = icingRisk(temp, dewPoint);
+      const shear = shearRisk(windKts, gustKts);
+      const turb = turbulenceRisk(gustKts);
 
       let visClass = "";
       if (visibility < 3000) visClass = "bad";
@@ -201,7 +206,6 @@ async function checkFlight(initStart, initDuration) {
         if (descLower.includes('light') && cloudCover < 99) return 'warn';
         return 'bad';
       })();
-
       const rainClass = rainLevel === 'bad' ? 'bad' : rainLevel === 'warn' ? 'warn' : '';
 
       messages.push(
@@ -210,14 +214,16 @@ Temperature: ${temp.toFixed(1)}°C
 ${highlight("Cloud base: ~", cloudBase + " ft AGL", cloudBase < 1000, "bad")}
 QNH: ${pressure} hPa
 QFE: ${QFE} hPa
-${highlight("Wind: ", windDeg + "° @ " + windKts + " kt", windKts > 20, "bad")}
-${highlight("Gusts: ", gustKts + " kt", gustKts > 20, "bad")}
+${highlight("Wind: ", windDeg + "° @ " + windKts + " kt", windKts > 20)}
+${highlight("Gusts: ", gustKts + " kt", gustKts > 20)}
 Visibility: ${visDisplay}
 Cloud cover: ${cloudCover} %
 Weather: <span class="${rainClass} highlight">${weatherDesc}</span>
 Icing Risk: ${icing === 'Risk' ? `<span class="bad highlight">${icing}</span>` : icing}
+Wind Shear Risk: ${shear.includes("⚠️") ? `<span class="warn highlight">${shear}</span>` : shear}
+Turbulence Risk: ${turb.includes("⚠️") ? `<span class="warn highlight">${turb}</span>` : turb}
 Predicted Runway: ${runway}
-${highlight("Status: ", safe.safe ? "✅ OK" : "❌ Limit Exceeded", !safe.safe, "bad")}\n`
+${highlight("Status: ", safe.safe ? "✅ OK" : "❌ Limit Exceeded", !safe.safe)}\n`
       );
     });
 
@@ -271,7 +277,7 @@ ${highlight("Status: ", safe.safe ? "✅ OK" : "❌ Limit Exceeded", !safe.safe,
 window.addEventListener('load', () => {
   const now = new Date();
   now.setUTCMinutes(0,0,0);
-  now.setUTCHours(now.getUTCHours() + 1); // default flight start one hour from now
+  now.setUTCHours(now.getUTCHours() + 1);
   const isoString = now.toISOString().slice(0,16);
   document.getElementById("start").value = isoString;
   document.getElementById("duration").value = 1;
