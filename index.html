@@ -35,7 +35,6 @@
     .red { color: red; }
     .highlight { font-weight: normal; }
   </style>
-  <script src="https://cdn.jsdelivr.net/npm/suncalc@1.9.0/suncalc.js"></script>
 </head>
 <body>
   <h1>C42 Flight Buddy</h1>
@@ -131,8 +130,21 @@ async function checkFlight() {
   const maxForecastTime = new Date(now.getTime() + 5 * 24 * 60 * 60 * 1000);
   const endTime = new Date(startTime.getTime() + duration * 3600 * 1000);
 
-  if (startTime <= now || startTime > maxForecastTime || endTime > maxForecastTime) {
+  // Night check: before 07:00 or after 22:00 UTC is night
+  const startHour = startTime.getUTCHours();
+  const endHour = endTime.getUTCHours();
+  const isNight = (hour) => (hour < 7 || hour >= 22);
+
+  if (startTime <= now) {
+    resDiv.innerHTML = '<p class="bad">Please enter a valid start time and duration.</p>';
+    return;
+  }
+  if (startTime > maxForecastTime || endTime > maxForecastTime) {
     resDiv.innerHTML = '<p class="bad">Please enter a valid start time and duration within the next 5 days.</p>';
+    return;
+  }
+  if (isNight(startHour) || isNight(endHour)) {
+    resDiv.innerHTML = '<p class="bad">Flying at night is not permitted, please select another time.</p>';
     return;
   }
 
@@ -174,17 +186,6 @@ async function checkFlight() {
     });
 
     let messages = [];
-
-    // Calculate sunrise and sunset for the flight date
-    const flightDate = new Date(Date.UTC(startTime.getUTCFullYear(), startTime.getUTCMonth(), startTime.getUTCDate()));
-    const sunTimes = SunCalc.getTimes(flightDate, LAT, LON);
-    const sunrise = sunTimes.sunrise;
-    const sunset = sunTimes.sunset;
-
-    // Check if flight start or end is outside daylight hours
-    const flightStartIsDay = (startTime >= sunrise && startTime <= sunset);
-    const flightEndIsDay = (endTime >= sunrise && endTime <= sunset);
-    const flightNightCheckFailed = !(flightStartIsDay && flightEndIsDay);
 
     relevantForecasts.forEach(item => {
       const main = item.main || {};
@@ -244,10 +245,6 @@ Predicted Runway: ${runway}
 ${highlight("Status: ", safe.safe ? "✅ OK" : "❌ Limit Exceeded", !safe.safe)}\n`
       );
     });
-
-    if (flightNightCheckFailed) {
-      messages.unshift('⚠️ Warning: Flight occurs partly or fully outside daylight hours.\n');
-    }
 
     const anyBad = relevantForecasts.some(item => {
       const main = item.main || {};
