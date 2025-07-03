@@ -1,48 +1,47 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>C42 Flight Buddy</title>
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      max-width: 600px;
-      margin: auto;
-      padding: 20px;
-      background: #f5f5f5;
-      color: #333;
-    }
-    input, button {
-      padding: 10px;
-      margin: 5px 0;
-      width: 100%;
-      font-size: 1rem;
-    }
-    #results {
-      margin-top: 20px;
-      padding: 15px;
-      background: #fff;
-      border-radius: 5px;
-      white-space: pre-wrap;
-      font-weight: normal;
-    }
-    .ok { color: green; }
-    .bad { color: red; }
-    .warn { color: #d48f00; } /* amber/yellow */
-    .highlight-red { color: red; }
-    .highlight-yellow { color: #d48f00; }
-    .highlight-green { color: green; }
-    .inline-bold {
-      font-weight: normal;
-    }
-    .version {
-      font-style: italic;
-      margin-bottom: 10px;
-      font-size: 0.9rem;
-      color: #555;
-    }
-  </style>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>C42 Flight Buddy</title>
+<style>
+  body {
+    font-family: Arial, sans-serif;
+    max-width: 600px;
+    margin: auto;
+    padding: 20px;
+    background: #f5f5f5;
+    color: #333;
+  }
+  input, button {
+    padding: 10px;
+    margin: 5px 0;
+    width: 100%;
+    font-size: 1rem;
+  }
+  #results {
+    margin-top: 20px;
+    padding: 15px;
+    background: #fff;
+    border-radius: 5px;
+    white-space: pre-wrap;
+    font-weight: normal;
+    font-size: 1rem;
+  }
+  .ok { color: green; }
+  .bad { color: red; }
+  .warn { color: #d48f00; } /* amber/yellow */
+  .highlight-red { color: red; }
+  .highlight-yellow { color: #d48f00; }
+  .highlight-green { color: green; }
+  .normal { color: black; }
+  .version {
+    font-style: italic;
+    margin-bottom: 10px;
+    font-size: 0.9rem;
+    color: #555;
+  }
+</style>
 </head>
 <body>
   <h1>C42 Flight Buddy</h1>
@@ -57,13 +56,14 @@
 
   <button onclick="checkFlight()">Check Flight</button>
 
-  <div id="results"></div>
+  <div id="results">
+    Please enter a valid start time and duration, then click 'Check Flight'.
+  </div>
 
 <script>
 const LAT = 51.605;
 const LON = -4.064;
 const API_KEY = '81a0d8bef1288c6437560f89b336dd33';
-const elevation = 295; // meters
 const RUNWAYS = { '04': 40, '22': 220, '10': 100, '28': 280 };
 
 function estimateDewPoint(temp, humidity) {
@@ -71,7 +71,7 @@ function estimateDewPoint(temp, humidity) {
 }
 
 function estimateCloudBase(temp, dewPoint) {
-  return Math.round((temp - dewPoint) * 400); // in feet AGL
+  return Math.round((temp - dewPoint) * 400); // feet AGL
 }
 
 function formatDateUK(date) {
@@ -82,11 +82,12 @@ function getIcingRisk(temp, dewPoint, humidity) {
   if (temp <= 0 && temp >= -15 && Math.abs(temp - dewPoint) <= 2 && humidity >= 80) {
     return {risk: "Risk", className: "highlight-red"};
   }
-  return {risk: "Low", className: ""};
+  return {risk: "Low", className: "normal"};
 }
 
-function predictWindShear(surfaceWind, upperWind, runwayDir) {
-  if (!surfaceWind || !upperWind) return false;
+// Wind shear prediction - returns level: 'None', 'Moderate', 'High' for coloring
+function predictWindShearLevel(surfaceWind, upperWind, runwayDir) {
+  if (!surfaceWind || !upperWind) return 'None';
 
   const dirDiff = Math.min(Math.abs(surfaceWind.deg - upperWind.deg), 360 - Math.abs(surfaceWind.deg - upperWind.deg));
   const speedDiff = Math.abs((upperWind.speed * 1.94384) - (surfaceWind.speed * 1.94384));
@@ -95,7 +96,12 @@ function predictWindShear(surfaceWind, upperWind, runwayDir) {
   const runwayDiffUpper = Math.min(Math.abs(upperWind.deg - runwayDir), 360 - Math.abs(upperWind.deg - runwayDir));
   const relevant = runwayDiffSurface <= 45 && runwayDiffUpper <= 45;
 
-  return relevant && (dirDiff > 30 || speedDiff > 15);
+  if (!relevant) return 'None';
+
+  if (dirDiff > 40 || speedDiff > 20) return 'High';
+  if (dirDiff > 25 || speedDiff > 10) return 'Moderate';
+
+  return 'None';
 }
 
 function predictRunway(windDir) {
@@ -128,16 +134,12 @@ function checkLimits(windKts, gustKts, vis, desc, cloudCover, cloudBase) {
   return { safe: true, msg: "" };
 }
 
+// Turbulence risk levels: None, Light, Moderate, High with matching colors
 function getTurbulenceRisk(windKts, gustKts) {
   if (gustKts > 20 || windKts > 20) return { risk: "High", className: "highlight-red" };
   if (gustKts > 15 || windKts > 15) return { risk: "Moderate", className: "highlight-yellow" };
-  if (gustKts > 5 || windKts > 5) return { risk: "Light", className: "highlight-green" };
-  return { risk: "None", className: "highlight-green" };
-}
-
-function getWindShearStatus(windShearDetected) {
-  if (windShearDetected) return { risk: "Possible wind shear detected", className: "highlight-red" };
-  return { risk: "None detected", className: "highlight-green" };
+  if (gustKts > 10 || windKts > 10) return { risk: "Light", className: "highlight-green" };
+  return { risk: "None", className: "normal" };
 }
 
 function formatVisibility(vis) {
@@ -146,49 +148,36 @@ function formatVisibility(vis) {
 
 function averageForecasts(forecasts) {
   if (!forecasts.length) return null;
-  const sum = {
-    temp: 0,
-    humidity: 0,
-    pressure: 0,
-    windSpeed: 0,
-    windDegX: 0,
-    windDegY: 0,
-    gustSpeed: 0,
-    visibility: 0,
-    cloudCover: 0,
-  };
-
+  let sumTemp = 0, sumHumidity = 0, sumPressure = 0, sumVisibility = 0, sumCloudCover = 0, sumGust = 0;
+  let windX = 0, windY = 0, sumWindSpeed = 0;
   forecasts.forEach(f => {
-    sum.temp += f.main.temp;
-    sum.humidity += f.main.humidity;
-    sum.pressure += f.main.pressure;
-    sum.visibility += (f.visibility !== undefined ? f.visibility : 10000);
-    sum.cloudCover += (f.clouds.all || 0);
-    sum.gustSpeed += (f.wind.gust || 0);
+    sumTemp += f.main.temp;
+    sumHumidity += f.main.humidity;
+    sumPressure += f.main.pressure;
+    sumVisibility += (f.visibility !== undefined ? f.visibility : 10000);
+    sumCloudCover += (f.clouds.all || 0);
+    sumGust += (f.wind.gust || 0);
 
     const angleRad = (f.wind.deg || 0) * Math.PI / 180;
-    sum.windDegX += Math.cos(angleRad);
-    sum.windDegY += Math.sin(angleRad);
+    windX += Math.cos(angleRad);
+    windY += Math.sin(angleRad);
 
-    sum.windSpeed += f.wind.speed;
+    sumWindSpeed += f.wind.speed;
   });
-
   const count = forecasts.length;
-  const avgTemp = sum.temp / count;
-  const avgHumidity = sum.humidity / count;
-  const avgPressure = sum.pressure / count;
-  const avgVisibility = sum.visibility / count;
-  const avgCloudCover = sum.cloudCover / count;
-  const avgGustSpeed = sum.gustSpeed / count;
-  const avgWindSpeed = sum.windSpeed / count;
+  const avgTemp = sumTemp / count;
+  const avgHumidity = sumHumidity / count;
+  const avgPressure = sumPressure / count;
+  const avgVisibility = sumVisibility / count;
+  const avgCloudCover = sumCloudCover / count;
+  const avgGust = sumGust / count;
+  const avgWindSpeed = sumWindSpeed / count;
+  const avgWindDir = (Math.atan2(windY / count, windX / count) * 180 / Math.PI + 360) % 360;
 
-  const avgWindDir = (Math.atan2(sum.windDegY / count, sum.windDegX / count) * 180 / Math.PI + 360) % 360;
   const avgDewPoint = estimateDewPoint(avgTemp, avgHumidity);
   const avgCloudBase = estimateCloudBase(avgTemp, avgDewPoint);
 
-  return {
-    avgTemp, avgHumidity, avgPressure, avgVisibility, avgCloudCover, avgGustSpeed, avgWindSpeed, avgWindDir, avgDewPoint, avgCloudBase
-  };
+  return { avgTemp, avgHumidity, avgPressure, avgVisibility, avgCloudCover, avgGust, avgWindSpeed, avgWindDir, avgDewPoint, avgCloudBase };
 }
 
 async function checkFlight() {
@@ -204,19 +193,21 @@ async function checkFlight() {
   const startDate = new Date(startInput + 'Z');
   const endDate = new Date(startDate.getTime() + durationInput * 3600 * 1000);
 
-  // API: fetch 3-hour forecast, find relevant forecast times overlapping flight window
-  const apiUrl = `https://api.openweathermap.org/data/2.5/forecast?lat=${LAT}&lon=${LON}&appid=${API_KEY}&units=metric`;
+  const forecastUrl = `https://api.openweathermap.org/data/2.5/forecast?lat=${LAT}&lon=${LON}&appid=${API_KEY}&units=metric`;
+  const currentUrl = `https://api.openweathermap.org/data/2.5/weather?lat=${LAT}&lon=${LON}&appid=${API_KEY}&units=metric`;
 
   try {
-    const response = await fetch(apiUrl);
-    if (!response.ok) throw new Error("Weather API error");
+    const [forecastResp, currentResp] = await Promise.all([fetch(forecastUrl), fetch(currentUrl)]);
+    if (!forecastResp.ok) throw new Error("Forecast API error");
+    if (!currentResp.ok) throw new Error("Current weather API error");
 
-    const data = await response.json();
+    const forecastData = await forecastResp.json();
+    const currentData = await currentResp.json();
 
     // Filter forecasts within flight window
-    const flightForecasts = data.list.filter(f => {
-      const forecastTime = new Date(f.dt * 1000);
-      return forecastTime >= startDate && forecastTime <= endDate;
+    const flightForecasts = forecastData.list.filter(f => {
+      const ft = new Date(f.dt * 1000);
+      return ft >= startDate && ft <= endDate;
     });
 
     if (!flightForecasts.length) {
@@ -226,40 +217,32 @@ async function checkFlight() {
 
     const avg = averageForecasts(flightForecasts);
 
-    // Calculate conditions
     const temp = avg.avgTemp.toFixed(1);
     const humidity = avg.avgHumidity.toFixed(0);
     const pressure = avg.avgPressure.toFixed(0);
     const visibility = avg.avgVisibility;
     const visibilityStr = formatVisibility(visibility);
     const windSpeedKts = (avg.avgWindSpeed * 1.94384);
-    const gustSpeedKts = (avg.avgGustSpeed * 1.94384);
+    const gustSpeedKts = (avg.avgGust * 1.94384);
     const windDir = avg.avgWindDir.toFixed(0);
     const cloudCover = avg.avgCloudCover.toFixed(0);
     const cloudBase = avg.avgCloudBase;
     const dewPoint = avg.avgDewPoint.toFixed(1);
+    const weatherDesc = flightForecasts[0].weather[0].description;
+
     const icingRisk = getIcingRisk(avg.avgTemp, avg.avgDewPoint, avg.avgHumidity);
     const turbulence = getTurbulenceRisk(windSpeedKts, gustSpeedKts);
+
     const runway = predictRunway(avg.avgWindDir);
 
-    // Wind shear check using surface wind and forecast upper wind (e.g. 850 hPa)
-    let windShearDetected = false;
+    // Wind shear level and color
+    const windShearLevel = predictWindShearLevel(currentData.wind, flightForecasts[0].wind, RUNWAYS[runway]);
+    let windShearClass = "normal";
+    if (windShearLevel === "Moderate") windShearClass = "highlight-yellow";
+    else if (windShearLevel === "High") windShearClass = "highlight-red";
 
-    // Get current weather for surface wind
-    const currentUrl = `https://api.openweathermap.org/data/2.5/weather?lat=${LAT}&lon=${LON}&appid=${API_KEY}&units=metric`;
-    const currentResp = await fetch(currentUrl);
-    if (currentResp.ok) {
-      const currentData = await currentResp.json();
-      const surfaceWind = currentData.wind;
-      // Use 850 hPa wind from forecast (roughly 1500m)
-      const upperWindData = data.list.find(f => f.main.pressure === 850) || flightForecasts[0];
-      if (surfaceWind && upperWindData) {
-        windShearDetected = predictWindShear(surfaceWind, upperWindData.wind, RUNWAYS[runway]);
-      }
-    }
-
-    // Check limits & warnings
-    const limitsCheck = checkLimits(parseFloat(windSpeedKts.toFixed(1)), parseFloat(gustSpeedKts.toFixed(1)), visibility, flightForecasts[0].weather[0].description, cloudCover, cloudBase);
+    // Limits check
+    const limitsCheck = checkLimits(windSpeedKts, gustSpeedKts, visibility, weatherDesc, cloudCover, cloudBase);
 
     let output = "";
     output += `Flight time: ${formatDateUK(startDate)} to ${formatDateUK(endDate)}\n\n`;
@@ -271,15 +254,16 @@ async function checkFlight() {
     output += `Gusts: ${gustSpeedKts.toFixed(1)} kt\n`;
     output += `Cloud cover: ${cloudCover} %\n`;
     output += `Estimated cloud base: ${cloudBase} ft AGL\n`;
-    output += `Dew point: ${dewPoint} °C\n\n`;
+    output += `Dew point: ${dewPoint} °C\n`;
+    output += `Weather: ${weatherDesc}\n\n`;
 
     output += `Icing risk: <span class="${icingRisk.className}">${icingRisk.risk}</span>\n`;
+
     output += `Turbulence risk: <span class="${turbulence.className}">${turbulence.risk}</span>\n`;
 
-    const windShearStatus = getWindShearStatus(windShearDetected);
-    output += `Wind shear: <span class="${windShearStatus.className}">${windShearStatus.risk}</span>\n`;
+    output += `Suggested runway: ${runway}\n`;
 
-    output += `Suggested runway: ${runway}\n\n`;
+    output += `Wind shear: <span class="${windShearClass}">${windShearLevel === "None" ? "None detected" : windShearLevel + " risk detected"}</span>\n\n`;
 
     if (!limitsCheck.safe) {
       output += `<span class="highlight-red">WARNING: ${limitsCheck.msg}</span>\n`;
