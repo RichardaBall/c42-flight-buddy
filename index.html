@@ -1,51 +1,60 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>C42 Flight Buddy</title>
-<style>
-  body {
-    font-family: Arial, sans-serif;
-    max-width: 600px;
-    margin: auto;
-    padding: 20px;
-    background: #f5f5f5;
-    color: #333;
-  }
-  input, button {
-    padding: 10px;
-    margin: 5px 0;
-    width: 100%;
-    font-size: 1rem;
-  }
-  #results {
-    margin-top: 20px;
-    padding: 15px;
-    background: #fff;
-    border-radius: 5px;
-    white-space: pre-wrap;
-    font-weight: normal;
-    font-size: 1rem;
-  }
-  .ok { color: green; }
-  .bad { color: red; }
-  .warn { color: #d48f00; } /* amber/yellow */
-  .highlight-red { color: red; }
-  .highlight-yellow { color: #d48f00; }
-  .highlight-green { color: green; }
-  .normal { color: black; }
-  .version {
-    font-style: italic;
-    margin-bottom: 10px;
-    font-size: 0.9rem;
-    color: #555;
-  }
-</style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>C42 Flight Buddy</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 600px;
+      margin: auto;
+      padding: 20px;
+      background: #f5f5f5;
+      color: #333;
+    }
+    input, button {
+      padding: 10px;
+      margin: 5px 0;
+      width: 100%;
+      font-size: 1rem;
+    }
+    #results {
+      margin-top: 20px;
+      padding: 15px;
+      background: #fff;
+      border-radius: 5px;
+      white-space: pre-wrap;
+      font-weight: normal;
+    }
+    .ok { color: green; }
+    .bad { color: red; }
+    .warn { color: #d48f00; } /* amber/yellow */
+    .highlight-red { color: red; }
+    .highlight-yellow { color: #d48f00; }
+    .inline-bold {
+      font-weight: normal;
+    }
+    /* Chart styles */
+    #chart {
+      margin-top: 20px;
+      width: 100%;
+      height: 120px;
+      background: #fafafa;
+      border: 1px solid #ccc;
+      border-radius: 5px;
+    }
+    .version {
+      font-style: italic;
+      margin-bottom: 10px;
+      font-size: 0.9rem;
+      color: #555;
+    }
+  </style>
 </head>
 <body>
   <h1>C42 Flight Buddy</h1>
-  <p class="version">Version: 17</p>
+  <p class="version">Version: 14</p>
   <p>Check flight weather from Swansea Airport</p>
 
   <label for="start">Flight start (GMT):</label>
@@ -56,14 +65,14 @@
 
   <button onclick="checkFlight()">Check Flight</button>
 
-  <div id="results">
-    Please enter a valid start time and duration, then click 'Check Flight'.
-  </div>
+  <div id="results"></div>
+  <canvas id="chart"></canvas>
 
 <script>
 const LAT = 51.605;
 const LON = -4.064;
 const API_KEY = '81a0d8bef1288c6437560f89b336dd33';
+const elevation = 295; // meters
 const RUNWAYS = { '04': 40, '22': 220, '10': 100, '28': 280 };
 
 function estimateDewPoint(temp, humidity) {
@@ -71,39 +80,41 @@ function estimateDewPoint(temp, humidity) {
 }
 
 function estimateCloudBase(temp, dewPoint) {
-  return Math.round((temp - dewPoint) * 400); // feet AGL
+  return Math.round((temp - dewPoint) * 400); // in feet AGL
 }
 
 function formatDateUK(date) {
+  // Format: Sat, 05 Jul 2025, 15:00 GMT
   return date.toUTCString().replace('UTC', 'GMT').replace(/(\d{2}:\d{2}):\d{2}/, '$1');
 }
 
+// More precise icing risk:
+// Temp between 0 and -15, dew point within 2 degrees, humidity > 80%
 function getIcingRisk(temp, dewPoint, humidity) {
   if (temp <= 0 && temp >= -15 && Math.abs(temp - dewPoint) <= 2 && humidity >= 80) {
     return {risk: "Risk", className: "highlight-red"};
   }
-  return {risk: "Low", className: "normal"};
+  return {risk: "Low", className: ""};
 }
 
-// Wind shear prediction - returns level: 'None', 'Moderate', 'High' for coloring
-function predictWindShearLevel(surfaceWind, upperWind, runwayDir) {
-  if (!surfaceWind || !upperWind) return 'None';
+// Wind shear prediction:
+// Compares wind direction and speed difference between near surface and ~1000ft.
+// If direction diff >30° or speed diff >15kt on predicted runway heading, flag wind shear.
+function predictWindShear(surfaceWind, upperWind, runwayDir) {
+  if (!surfaceWind || !upperWind) return false;
 
   const dirDiff = Math.min(Math.abs(surfaceWind.deg - upperWind.deg), 360 - Math.abs(surfaceWind.deg - upperWind.deg));
   const speedDiff = Math.abs((upperWind.speed * 1.94384) - (surfaceWind.speed * 1.94384));
 
+  // Check if direction difference impacts runway approach alignment (within ±45° of runway)
   const runwayDiffSurface = Math.min(Math.abs(surfaceWind.deg - runwayDir), 360 - Math.abs(surfaceWind.deg - runwayDir));
   const runwayDiffUpper = Math.min(Math.abs(upperWind.deg - runwayDir), 360 - Math.abs(upperWind.deg - runwayDir));
   const relevant = runwayDiffSurface <= 45 && runwayDiffUpper <= 45;
 
-  if (!relevant) return 'None';
-
-  if (dirDiff > 40 || speedDiff > 20) return 'High';
-  if (dirDiff > 25 || speedDiff > 10) return 'Moderate';
-
-  return 'None';
+  return relevant && (dirDiff > 30 || speedDiff > 15);
 }
 
+// Predict runway based on wind direction
 function predictRunway(windDir) {
   return Object.entries(RUNWAYS).reduce((a, b) => {
     const aDiff = Math.min(Math.abs(a[1] - windDir), 360 - Math.abs(a[1] - windDir));
@@ -134,50 +145,225 @@ function checkLimits(windKts, gustKts, vis, desc, cloudCover, cloudBase) {
   return { safe: true, msg: "" };
 }
 
-// Turbulence risk levels: None, Light, Moderate, High with matching colors
+// Simple turbulence risk based on wind gusts & wind speed differences:
+// Gusts > 15kt or wind speed > 15kt = Moderate turbulence
+// Gusts > 20kt or wind speed > 20kt = High turbulence
 function getTurbulenceRisk(windKts, gustKts) {
   if (gustKts > 20 || windKts > 20) return { risk: "High", className: "highlight-red" };
   if (gustKts > 15 || windKts > 15) return { risk: "Moderate", className: "highlight-yellow" };
-  if (gustKts > 10 || windKts > 10) return { risk: "Light", className: "highlight-green" };
-  return { risk: "None", className: "normal" };
+  return { risk: "Low", className: "" };
 }
 
+// Display visibility formatted
 function formatVisibility(vis) {
   return vis > 5000 ? ">5000 m" : `${vis} m`;
 }
 
+// Smooth/average forecast values over flight duration
 function averageForecasts(forecasts) {
   if (!forecasts.length) return null;
-  let sumTemp = 0, sumHumidity = 0, sumPressure = 0, sumVisibility = 0, sumCloudCover = 0, sumGust = 0;
-  let windX = 0, windY = 0, sumWindSpeed = 0;
-  forecasts.forEach(f => {
-    sumTemp += f.main.temp;
-    sumHumidity += f.main.humidity;
-    sumPressure += f.main.pressure;
-    sumVisibility += (f.visibility !== undefined ? f.visibility : 10000);
-    sumCloudCover += (f.clouds.all || 0);
-    sumGust += (f.wind.gust || 0);
+  const sum = {
+    temp: 0,
+    humidity: 0,
+    pressure: 0,
+    windSpeed: 0,
+    windDeg: 0,
+    gustSpeed: 0,
+    visibility: 0,
+    cloudCover: 0,
+    dewPoint: 0,
+  };
+  let windX = 0, windY = 0;
 
+  forecasts.forEach(f => {
+    sum.temp += f.main.temp;
+    sum.humidity += f.main.humidity;
+    sum.pressure += f.main.pressure;
+    sum.visibility += (f.visibility !== undefined ? f.visibility : 10000);
+    sum.cloudCover += (f.clouds.all || 0);
+    sum.gustSpeed += (f.wind.gust || 0);
+
+    // Wind vector average to handle circular direction
     const angleRad = (f.wind.deg || 0) * Math.PI / 180;
     windX += Math.cos(angleRad);
     windY += Math.sin(angleRad);
 
-    sumWindSpeed += f.wind.speed;
+    sum.windSpeed += f.wind.speed;
   });
-  const count = forecasts.length;
-  const avgTemp = sumTemp / count;
-  const avgHumidity = sumHumidity / count;
-  const avgPressure = sumPressure / count;
-  const avgVisibility = sumVisibility / count;
-  const avgCloudCover = sumCloudCover / count;
-  const avgGust = sumGust / count;
-  const avgWindSpeed = sumWindSpeed / count;
-  const avgWindDir = (Math.atan2(windY / count, windX / count) * 180 / Math.PI + 360) % 360;
 
+  const count = forecasts.length;
+  const avgTemp = sum.temp / count;
+  const avgHumidity = sum.humidity / count;
+  const avgPressure = sum.pressure / count;
+  const avgVisibility = sum.visibility / count;
+  const avgCloudCover = sum.cloudCover / count;
+  const avgGustSpeed = sum.gustSpeed / count;
+  const avgWindSpeed = sum.windSpeed / count;
+
+  const avgWindDir = (Math.atan2(windY / count, windX / count) * 180 / Math.PI + 360) % 360;
   const avgDewPoint = estimateDewPoint(avgTemp, avgHumidity);
   const avgCloudBase = estimateCloudBase(avgTemp, avgDewPoint);
 
-  return { avgTemp, avgHumidity, avgPressure, avgVisibility, avgCloudCover, avgGust, avgWindSpeed, avgWindDir, avgDewPoint, avgCloudBase };
+  return {
+    avgTemp, avgHumidity, avgPressure, avgVisibility, avgCloudCover, avgGustSpeed, avgWindSpeed, avgWindDir, avgDewPoint, avgCloudBase
+  };
+}
+
+// Chart drawing helper (simple line chart)
+function drawChart(forecasts) {
+  const canvas = document.getElementById('chart');
+  const ctx = canvas.getContext('2d');
+  const width = canvas.width = canvas.clientWidth;
+  const height = canvas.height = canvas.clientHeight;
+
+  ctx.clearRect(0, 0, width, height);
+
+  if (!forecasts.length) {
+    ctx.fillStyle = '#333';
+    ctx.fillText('No forecast data to chart.', 10, 20);
+    return;
+  }
+
+  // Prepare data arrays for wind speed, gust, cloud base, icing risk (0 = low, 1 = risk)
+  const windSpeeds = [];
+  const gustSpeeds = [];
+  const cloudBases = [];
+  const icingRisks = [];
+  const times = [];
+
+  forecasts.forEach(f => {
+    windSpeeds.push(f.wind.speed * 1.94384);
+    gustSpeeds.push((f.wind.gust || f.wind.speed) * 1.94384);
+    const temp = f.main.temp;
+    const humidity = f.main.humidity;
+    const dewPoint = estimateDewPoint(temp, humidity);
+    cloudBases.push(estimateCloudBase(temp, dewPoint));
+    const icing = getIcingRisk(temp, dewPoint, humidity);
+    icingRisks.push(icing.risk === "Risk" ? 1 : 0);
+    times.push(new Date(f.dt * 1000));
+  });
+
+  // Find max values for scaling
+  const maxWind = Math.max(...windSpeeds, ...gustSpeeds, 25);
+  const maxCloudBase = Math.min(Math.max(...cloudBases), 4000); // cap cloud base for chart
+
+  // Margins
+  const marginLeft = 40;
+  const marginBottom = 30;
+  const marginTop = 20;
+  const chartWidth = width - marginLeft - 20;
+  const chartHeight = height - marginBottom - marginTop;
+
+  // Draw axes
+  ctx.strokeStyle = '#aaa';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(marginLeft, marginTop);
+  ctx.lineTo(marginLeft, height - marginBottom);
+  ctx.lineTo(width - 20, height - marginBottom);
+  ctx.stroke();
+
+  // Y-axis labels (Wind speed on left, cloud base on right)
+  ctx.fillStyle = '#333';
+  ctx.font = '10px Arial';
+  ctx.textAlign = 'right';
+
+  for(let i=0; i<=5; i++) {
+    const y = marginTop + chartHeight - (chartHeight * i / 5);
+    const windLabel = Math.round(maxWind * i / 5);
+    ctx.fillText(`${windLabel} kt`, marginLeft - 5, y+3);
+  }
+
+  ctx.textAlign = 'left';
+  for(let i=0; i<=5; i++) {
+    const y = marginTop + chartHeight - (chartHeight * i / 5);
+    const cloudLabel = Math.round(maxCloudBase * i / 5);
+    ctx.fillText(`${cloudLabel} ft`, width - 60, y+3);
+  }
+
+  // X-axis labels (time)
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#555';
+  const len = times.length;
+  for(let i=0; i<len; i++) {
+    const x = marginLeft + (chartWidth * i / (len-1));
+    const timeStr = times[i].toUTCString().slice(17,22); // "HH:MM"
+    ctx.fillText(timeStr, x, height - 10);
+  }
+
+  // Draw wind speed line (blue)
+  ctx.strokeStyle = '#007acc';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  windSpeeds.forEach((v,i) => {
+    const x = marginLeft + (chartWidth * i / (len-1));
+    const y = marginTop + chartHeight - (chartHeight * v / maxWind);
+    if(i === 0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  });
+  ctx.stroke();
+
+  // Draw gust speed line (cyan)
+  ctx.strokeStyle = '#00cfff';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  gustSpeeds.forEach((v,i) => {
+    const x = marginLeft + (chartWidth * i / (len-1));
+    const y = marginTop + chartHeight - (chartHeight * v / maxWind);
+    if(i === 0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  });
+  ctx.stroke();
+
+  // Draw cloud base line (gray, scaled differently)
+  ctx.strokeStyle = '#666';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  cloudBases.forEach((v,i) => {
+    const x = marginLeft + (chartWidth * i / (len-1));
+    const y = marginTop + chartHeight - (chartHeight * v / maxCloudBase);
+    if(i === 0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  });
+  ctx.stroke();
+
+  // Draw icing risk markers (red dots)
+  ctx.fillStyle = 'red';
+  icingRisks.forEach((risk,i) => {
+    if (risk === 1) {
+      const x = marginLeft + (chartWidth * i / (len-1));
+      const y = marginTop + 10;
+      ctx.beginPath();
+      ctx.arc(x, y, 5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  });
+
+  // Legend
+  ctx.fillStyle = '#007acc';
+  ctx.fillRect(marginLeft, marginTop - 15, 10, 10);
+  ctx.fillStyle = '#333';
+  ctx.fillText('Wind Speed (kt)', marginLeft + 15, marginTop - 6);
+
+  ctx.fillStyle = '#00cfff';
+  ctx.fillRect(marginLeft + 130, marginTop - 15, 10, 10);
+  ctx.fillStyle = '#333';
+  ctx.fillText('Gust Speed (kt)', marginLeft + 145, marginTop - 6);
+
+  ctx.fillStyle = '#666';
+  ctx.fillRect(marginLeft + 260, marginTop - 15, 10, 10);
+  ctx.fillStyle = '#333';
+  ctx.fillText('Cloud Base (ft)', marginLeft + 275, marginTop - 6);
+
+  ctx.fillStyle = 'red';
+  ctx.beginPath();
+  ctx.arc(marginLeft + 380, marginTop - 10, 5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#333';
+  ctx.fillText('Icing Risk', marginLeft + 395, marginTop - 6);
+}
+
+// Format time for display on page
+function formatInputDateTimeLocal(date) {
+  const pad = n => n.toString().padStart(2,'0');
+  return `${date.getFullYear()}-${pad(date.getMonth()+1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 async function checkFlight() {
@@ -191,94 +377,143 @@ async function checkFlight() {
   }
 
   const startDate = new Date(startInput + 'Z');
-  const endDate = new Date(startDate.getTime() + durationInput * 3600 * 1000);
+  if (isNaN(startDate)) {
+    resultsDiv.innerHTML = "<span class='highlight-red'>Invalid start date/time.</span>";
+    return;
+  }
 
-  const forecastUrl = `https://api.openweathermap.org/data/2.5/forecast?lat=${LAT}&lon=${LON}&appid=${API_KEY}&units=metric`;
-  const currentUrl = `https://api.openweathermap.org/data/2.5/weather?lat=${LAT}&lon=${LON}&appid=${API_KEY}&units=metric`;
+  const now = new Date();
+  if (startDate < now) {
+    resultsDiv.innerHTML = "<span class='highlight-red'>Start time must be in the future.</span>";
+    return;
+  }
+  if ((startDate - now) > 5 * 24 * 60 * 60 * 1000) {
+    resultsDiv.innerHTML = "<span class='highlight-red'>Start time must be within the next 5 days.</span>";
+    return;
+  }
 
+  const endDate = new Date(startDate.getTime() + durationInput * 60 * 60 * 1000);
+
+  // Get weather forecast from OpenWeather 3-hour forecast API
   try {
-    const [forecastResp, currentResp] = await Promise.all([fetch(forecastUrl), fetch(currentUrl)]);
-    if (!forecastResp.ok) throw new Error("Forecast API error");
-    if (!currentResp.ok) throw new Error("Current weather API error");
+    const response = await fetch(`https://api.openweathermap.org/data/2.5/forecast?lat=${LAT}&lon=${LON}&appid=${API_KEY}&units=metric`);
+    if (!response.ok) throw new Error('Weather API error');
+    const data = await response.json();
 
-    const forecastData = await forecastResp.json();
-    const currentData = await currentResp.json();
-
-    // Filter forecasts within flight window
-    const flightForecasts = forecastData.list.filter(f => {
-      const ft = new Date(f.dt * 1000);
-      return ft >= startDate && ft <= endDate;
+    // Filter forecasts within flight window (overlap any part)
+    const flightForecasts = data.list.filter(f => {
+      const fDate = new Date(f.dt * 1000);
+      return (fDate >= startDate && fDate <= endDate);
     });
 
-    if (!flightForecasts.length) {
-      resultsDiv.innerHTML = "<span class='highlight-red'>No forecast data available for flight time.</span>";
+    if (flightForecasts.length === 0) {
+      resultsDiv.innerHTML = "<span class='highlight-red'>No forecast data available for your flight time.</span>";
       return;
     }
 
+    // Average forecast values
     const avg = averageForecasts(flightForecasts);
 
-    const temp = avg.avgTemp.toFixed(1);
-    const humidity = avg.avgHumidity.toFixed(0);
-    const pressure = avg.avgPressure.toFixed(0);
-    const visibility = avg.avgVisibility;
-    const visibilityStr = formatVisibility(visibility);
-    const windSpeedKts = (avg.avgWindSpeed * 1.94384);
-    const gustSpeedKts = (avg.avgGust * 1.94384);
-    const windDir = avg.avgWindDir.toFixed(0);
-    const cloudCover = avg.avgCloudCover.toFixed(0);
+    // Calculate QNH and QFE (QFE = QNH - elevation in hPa)
+    const qnh = Math.round(avg.avgPressure);
+    const qfe = (qnh - (elevation / 30)).toFixed(1);
+
+    // Wind and gust knots
+    const windKts = avg.avgWindSpeed * 1.94384;
+    const gustKts = avg.avgGustSpeed * 1.94384;
+
+    // Visibility
+    const vis = avg.avgVisibility;
+
+    // Cloud base feet AGL
     const cloudBase = avg.avgCloudBase;
-    const dewPoint = avg.avgDewPoint.toFixed(1);
-    const weatherDesc = flightForecasts[0].weather[0].description;
 
-    const icingRisk = getIcingRisk(avg.avgTemp, avg.avgDewPoint, avg.avgHumidity);
-    const turbulence = getTurbulenceRisk(windSpeedKts, gustSpeedKts);
+    // Cloud cover %
+    const cloudCover = avg.avgCloudCover;
 
+    // Weather description (most frequent)
+    const weatherCounts = {};
+    flightForecasts.forEach(f => {
+      const desc = f.weather[0].description;
+      weatherCounts[desc] = (weatherCounts[desc] || 0) + 1;
+    });
+    const weatherDesc = Object.entries(weatherCounts).reduce((a,b) => a[1] > b[1] ? a : b)[0];
+
+    // Icing risk
+    const icing = getIcingRisk(avg.avgTemp, avg.avgDewPoint, avg.avgHumidity);
+
+    // Turbulence risk
+    const turb = getTurbulenceRisk(windKts, gustKts);
+
+    // Predicted runway
     const runway = predictRunway(avg.avgWindDir);
 
-    // Wind shear level and color
-    const windShearLevel = predictWindShearLevel(currentData.wind, flightForecasts[0].wind, RUNWAYS[runway]);
-    let windShearClass = "normal";
-    if (windShearLevel === "Moderate") windShearClass = "highlight-yellow";
-    else if (windShearLevel === "High") windShearClass = "highlight-red";
-
-    // Limits check
-    const limitsCheck = checkLimits(windSpeedKts, gustSpeedKts, visibility, weatherDesc, cloudCover, cloudBase);
-
-    let output = "";
-    output += `Flight time: ${formatDateUK(startDate)} to ${formatDateUK(endDate)}\n\n`;
-    output += `Temperature: ${temp} °C\n`;
-    output += `Humidity: ${humidity} %\n`;
-    output += `Pressure: ${pressure} hPa\n`;
-    output += `Visibility: ${visibilityStr}\n`;
-    output += `Wind: ${windSpeedKts.toFixed(1)} kt @ ${windDir}°\n`;
-    output += `Gusts: ${gustSpeedKts.toFixed(1)} kt\n`;
-    output += `Cloud cover: ${cloudCover} %\n`;
-    output += `Estimated cloud base: ${cloudBase} ft AGL\n`;
-    output += `Dew point: ${dewPoint} °C\n`;
-    output += `Weather: ${weatherDesc}\n\n`;
-
-    output += `Icing risk: <span class="${icingRisk.className}">${icingRisk.risk}</span>\n`;
-
-    output += `Turbulence risk: <span class="${turbulence.className}">${turbulence.risk}</span>\n`;
-
-    output += `Suggested runway: ${runway}\n`;
-
-    output += `Wind shear: <span class="${windShearClass}">${windShearLevel === "None" ? "None detected" : windShearLevel + " risk detected"}</span>\n\n`;
-
-    if (!limitsCheck.safe) {
-      output += `<span class="highlight-red">WARNING: ${limitsCheck.msg}</span>\n`;
-    } else if (limitsCheck.warn) {
-      output += `<span class="highlight-yellow">Caution: ${limitsCheck.msg}</span>\n`;
-    } else {
-      output += `<span class="ok">Flight conditions within C42 limits.</span>\n`;
+    // Wind shear prediction (use surface and next forecast up ~1000ft, approximate as next forecast)
+    let windShear = false;
+    if (flightForecasts.length > 1) {
+      // Use first forecast as surface, second as ~1000ft approx
+      windShear = predictWindShear(flightForecasts[0].wind, flightForecasts[1].wind, RUNWAYS[runway]);
     }
 
-    resultsDiv.innerHTML = output;
+    // Limits check
+    const limitsCheck = checkLimits(windKts, gustKts, vis, weatherDesc, cloudCover, cloudBase);
 
-  } catch (error) {
-    resultsDiv.innerHTML = `<span class="highlight-red">Error fetching weather data: ${error.message}</span>`;
+    // Compose output text
+    let output = '';
+    const flightStartStr = formatDateUK(startDate);
+
+    output += `Time: ${flightStartStr}\n`;
+    output += `Temperature: ${avg.avgTemp.toFixed(1)}°C\n`;
+    output += `Cloud base: ~${cloudBase} ft AGL${cloudBase < 1000 ? ' ' + '<span class="highlight-red">⚠️</span>' : ''}\n`;
+    output += `QNH: ${qnh} hPa\n`;
+    output += `QFE: ${qfe} hPa\n`;
+    output += `Wind: ${Math.round(avg.avgWindDir)}° @ ${windKts.toFixed(1)} kt${windKts > 20 ? ' ' + '<span class="highlight-red">⚠️</span>' : ''}\n`;
+    output += `Gusts: ${gustKts.toFixed(1)} kt${gustKts > 20 ? ' ' + '<span class="highlight-red">⚠️</span>' : ''}\n`;
+    output += `Visibility: ${formatVisibility(vis)}${vis < 5000 ? ' ' + '<span class="highlight-red">⚠️</span>' : ''}\n`;
+    output += `Cloud cover: ${Math.round(cloudCover)} %\n`;
+
+    // Weather line with inline colored value only
+    const weatherClass = (limitsCheck.field === "Weather" && !limitsCheck.safe) ? "highlight-red" :
+                         (limitsCheck.warn ? "highlight-yellow" : "");
+    output += `Weather: <span class="${weatherClass}">${weatherDesc}</span>\n`;
+
+    // Icing Risk line with coloring of risk only
+    output += `Icing Risk: <span class="${icing.className}">${icing.risk}</span>\n`;
+
+    // Turbulence line with coloring of risk only
+    output += `Turbulence (below 5000 ft): <span class="${turb.className}">${turb.risk}</span>\n`;
+
+    // Wind shear warning line if present
+    if (windShear) {
+      output += `<span class="highlight-red">Wind Shear predicted on Runway ${runway}</span>\n`;
+    }
+
+    output += `Predicted Runway: ${runway}\n`;
+
+    if (limitsCheck.safe) {
+      output += `Status: <span class="ok">✅ Within Limits</span>\n`;
+    } else {
+      output += `Status: <span class="bad">❌ Limit Exceeded</span>\n`;
+      output += `Note: ${limitsCheck.msg}\n`;
+    }
+
+    document.getElementById('results').innerHTML = output;
+
+    // Draw chart for full flight forecasts
+    drawChart(flightForecasts);
+
+  } catch (err) {
+    document.getElementById('results').innerHTML = `<span class='highlight-red'>Error retrieving weather data.</span>`;
   }
 }
+
+// On load, set start input to current date/time rounded to next hour and run initial check
+window.onload = () => {
+  const now = new Date();
+  now.setMinutes(0,0,0);
+  document.getElementById('start').value = formatInputDateTimeLocal(now);
+  checkFlight();
+};
 </script>
 </body>
 </html>
