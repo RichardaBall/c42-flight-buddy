@@ -28,17 +28,13 @@
     }
     .ok { color: green; }
     .bad { color: red; }
+    .warn { color: goldenrod; }
     .highlight { color: red; }
-    #version {
-      text-align: right;
-      font-weight: bold;
-      margin-bottom: 10px;
-    }
   </style>
 </head>
 <body>
-  <div id="version">Version: 08</div>
   <h1>C42 Flight Buddy</h1>
+  <p><em>Version: 2025-07-03-10</em></p>
   <p>Check flight weather from Swansea Airport</p>
 
   <label for="start">Flight start (GMT):</label>
@@ -62,39 +58,48 @@ function estimateDewPoint(temp, humidity) {
 }
 
 function estimateCloudBase(temp, dewPoint) {
-  return Math.round((temp - dewPoint) * 400); // in feet AGL
+  return Math.round((temp - dewPoint) * 400);
 }
 
-function formatDateUK(d) {
-  const dd = String(d.getUTCDate()).padStart(2, '0');
-  const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
-  const yyyy = d.getUTCFullYear();
-  const hh = String(d.getUTCHours()).padStart(2, '0');
-  const min = String(d.getUTCMinutes()).padStart(2, '0');
-  const ss = String(d.getUTCSeconds()).padStart(2, '0');
-  return `${dd}/${mm}/${yyyy} ${hh}:${min}:${ss} GMT`;
+function icingRisk(temp, cloudCover, desc) {
+  const risky = temp <= 3 && cloudCover > 40 && /rain|drizzle/i.test(desc);
+  return risky ? 'Risk' : 'Low';
 }
 
-function getCurrentDateTimeLocal() {
-  const now = new Date();
-  now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
-  return now.toISOString().slice(0, 16);
+function formatDateUK(date) {
+  return date.toLocaleString('en-GB', {
+    weekday: 'short', year: 'numeric', month: 'short',
+    day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'UTC'
+  }) + ' GMT';
 }
 
-async function checkFlight() {
+function rainWarning(desc, cloudCover) {
+  if (!/rain/i.test(desc)) return { level: 'none', msg: '' };
+  if (/light rain/i.test(desc) && cloudCover <= 50) return { level: 'warn', msg: 'Light rain with low cloud cover' };
+  return { level: 'bad', msg: 'Rain not suitable for C42' };
+}
+
+async function checkFlight(auto = false) {
   const startInput = document.getElementById("start").value;
   const duration = parseFloat(document.getElementById("duration").value);
   const resDiv = document.getElementById("results");
 
-  if (!startInput || isNaN(duration) || duration <= 0) {
-    resDiv.innerHTML = '<p class="bad">Please enter a valid start time and duration.</p>';
-    return;
+  const now = new Date();
+  let startTime;
+
+  if (!startInput && auto) {
+    startTime = new Date(now);
+    document.getElementById("start").value = startTime.toISOString().slice(0,16);
+  } else {
+    if (!startInput || isNaN(duration) || duration <= 0) {
+      resDiv.innerHTML = '<p class="bad">Please enter a valid start time and duration.</p>';
+      return;
+    }
+    startTime = new Date(startInput + "Z");
   }
 
-  const startTime = new Date(startInput + "Z");
-  const now = new Date();
-  const maxForecastTime = new Date(now.getTime() + 5 * 24 * 60 * 60 * 1000);
   const endTime = new Date(startTime.getTime() + duration * 3600 * 1000);
+  const maxForecastTime = new Date(now.getTime() + 5 * 24 * 60 * 60 * 1000);
 
   if (startTime <= now || startTime > maxForecastTime || endTime > maxForecastTime) {
     resDiv.innerHTML = '<p class="bad">Please enter a valid start time and duration within the next 5 days.</p>';
@@ -157,7 +162,7 @@ async function checkFlight() {
       const temp = main.temp || 0;
       const windDeg = wind.deg || 0;
       const windSpeed = wind.speed || 0;
-      const gustSpeed = wind.gust || 0;
+      const windGust = wind.gust || 0;
       const visibility = item.visibility !== undefined ? item.visibility : 10000;
       const cloudCover = clouds.all || 0;
       const weatherDesc = weatherArr.length ? weatherArr[0].description : "unknown";
@@ -165,33 +170,36 @@ async function checkFlight() {
       const dewPoint = estimateDewPoint(temp, humidity);
       const cloudBase = estimateCloudBase(temp, dewPoint);
       const windKts = (windSpeed * 1.94384).toFixed(1);
-      const gustKts = (gustSpeed * 1.94384).toFixed(1);
+      const gustKts = (windGust * 1.94384).toFixed(1);
       const QFE = (pressure - (elevation * 0.12)).toFixed(1);
       const runway = predictRunway(windDeg);
-      const icingPossible = (temp >= -5 && temp <= 3) && (cloudCover > 50 || weatherDesc.toLowerCase().includes("rain")) ? "Yes" : "No";
-
-      const safe = checkLimits(windKts, gustKts, visibility, weatherDesc, cloudCover, cloudBase, temp);
-      const statusText = safe.safe ? "✅ OK" : `<span class="highlight">❌ ${safe.msg}</span>`;
+      const icing = icingRisk(temp, cloudCover, weatherDesc);
+      const rain = rainWarning(weatherDesc, cloudCover);
       const timeLabel = formatDateUK(new Date(item.dt * 1000));
 
-      if (!safe.safe) {
-        issues.push(`At ${timeLabel}: ${safe.msg}`);
-      }
+      const limits = checkLimits(windKts, gustKts, visibility, weatherDesc, cloudCover, cloudBase);
+      const highlight = (val, exceeded) => exceeded ? `<span class="highlight">${val}</span>` : val;
+      const warn = (val, warnClass) => warnClass === 'warn' ? `<span class="warn">${val}</span>` : highlight(val, warnClass === 'bad');
 
       messages.push(
 `Time: ${timeLabel}
 Temperature: ${temp.toFixed(1)}°C
-Cloud base: ~${cloudBase < 1000 ? `<span class="highlight">${cloudBase} ft AGL</span>` : `${cloudBase} ft AGL`}
+Cloud base: ~${highlight(`${cloudBase} ft AGL`, cloudBase < 1000)}
 QNH: ${pressure} hPa
 QFE: ${QFE} hPa
-Wind: ${windDeg}° @ ${windKts} kt (Gusts: ${gustKts} kt)
-Visibility: ${visibility} m
+Wind: ${windDeg}° @ ${highlight(`${windKts} kt`, parseFloat(windKts) > 20)} (Gusts: ${highlight(`${gustKts} kt`, parseFloat(gustKts) > 20)})
+Visibility: ${highlight(`${visibility} m`, visibility < 5000)}
 Cloud cover: ${cloudCover} %
-Weather: ${weatherDesc}
+Weather: ${warn(weatherDesc, rain.level)}
 Predicted Runway: ${runway}
-Icing Possible: ${icingPossible}
-Status: ${statusText}`
+Icing Risk: ${highlight(icing, icing === 'Risk')}
+Status: ${limits.safe ? "✅ OK" : "❌ Limit Exceeded"}\n`
       );
+
+      if (!limits.safe) issues.push(`At ${timeLabel}: ${limits.msg}`);
+      if (rain.level === 'warn') issues.push(`At ${timeLabel}: ${rain.msg}`);
+      if (rain.level === 'bad') issues.push(`At ${timeLabel}: ${rain.msg}`);
+      if (icing === 'Risk') issues.push(`At ${timeLabel}: Icing conditions possible`);
     });
 
     const overallStatus = issues.length === 0
@@ -200,7 +208,7 @@ Status: ${statusText}`
 
     resDiv.innerHTML = `
       <h3>Flight Weather Check for ${formatDateUK(startTime)} to ${formatDateUK(endTime)}</h3>
-      <pre>${messages.join("\n\n")}</pre>
+      <pre>${messages.join("\n")}</pre>
       ${overallStatus}
     `;
 
@@ -218,11 +226,10 @@ function predictRunway(windDir) {
   })[0];
 }
 
-function checkLimits(wind, gust, vis, desc, cloudCover, cloudBase, temp) {
+function checkLimits(wind, gust, vis, desc, cloudCover, cloudBase) {
   if (parseFloat(wind) > 20) return { safe: false, msg: "Wind exceeds C42 limits (>20 kt)" };
-  if (parseFloat(gust) > 22) return { safe: false, msg: "Wind gusts exceed C42 limit (>22 kt)" };
+  if (parseFloat(gust) > 20) return { safe: false, msg: "Gusts exceed C42 limits (>20 kt)" };
   if (vis < 5000) return { safe: false, msg: "Visibility too low (<5000 m)" };
-  if (desc.toLowerCase().includes("rain")) return { safe: false, msg: "Rain not suitable for C42" };
   if (desc.toLowerCase().includes("fog") || desc.toLowerCase().includes("mist")) {
     return { safe: false, msg: "Fog or mist present — not suitable" };
   }
@@ -230,12 +237,7 @@ function checkLimits(wind, gust, vis, desc, cloudCover, cloudBase, temp) {
   return { safe: true, msg: "" };
 }
 
-// Auto-set datetime input and trigger check on page load
-window.onload = () => {
-  const startInput = document.getElementById("start");
-  startInput.value = getCurrentDateTimeLocal();
-  checkFlight();
-};
+window.onload = () => checkFlight(true);
 </script>
 </body>
 </html>
