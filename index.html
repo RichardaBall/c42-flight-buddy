@@ -34,7 +34,7 @@
 </head>
 <body>
   <h1>C42 Flight Buddy</h1>
-  <p><em>Version: 2025-07-01-11</em></p>
+  <p><em>Version: 2025-07-01-12</em></p>
   <p>Check flight weather from Swansea Airport</p>
 
   <label for="start">Flight start (GMT):</label>
@@ -265,7 +265,6 @@ ${highlight("Status: ", safe.safe ? "✅ OK" : "❌ Limit Exceeded", !safe.safe,
       <h3>Flight Weather Check for ${formatUKDate(startTime)} to ${formatUKDate(endTime)}</h3>
       <pre>${messages.join("\n")}</pre>
       ${overallStatus}
-      <p><em>Version: 2025-07-01-11</em></p>
     `;
 
   } catch (e) {
