@@ -46,7 +46,7 @@
 </head>
 <body>
   <h1>C42 Flight Buddy</h1>
-  <p class="version">Version: 16</p>
+  <p class="version">Version: 17</p>
   <p>Check flight weather from Swansea Airport</p>
 
   <label for="start">Flight start (GMT):</label>
@@ -131,7 +131,13 @@ function checkLimits(windKts, gustKts, vis, desc, cloudCover, cloudBase) {
 function getTurbulenceRisk(windKts, gustKts) {
   if (gustKts > 20 || windKts > 20) return { risk: "High", className: "highlight-red" };
   if (gustKts > 15 || windKts > 15) return { risk: "Moderate", className: "highlight-yellow" };
+  if (gustKts > 5 || windKts > 5) return { risk: "Light", className: "highlight-green" };
   return { risk: "None", className: "highlight-green" };
+}
+
+function getWindShearStatus(windShearDetected) {
+  if (windShearDetected) return { risk: "Possible wind shear detected", className: "highlight-red" };
+  return { risk: "None detected", className: "highlight-green" };
 }
 
 function formatVisibility(vis) {
@@ -145,13 +151,12 @@ function averageForecasts(forecasts) {
     humidity: 0,
     pressure: 0,
     windSpeed: 0,
-    windDeg: 0,
+    windDegX: 0,
+    windDegY: 0,
     gustSpeed: 0,
     visibility: 0,
     cloudCover: 0,
-    dewPoint: 0,
   };
-  let windX = 0, windY = 0;
 
   forecasts.forEach(f => {
     sum.temp += f.main.temp;
@@ -162,8 +167,8 @@ function averageForecasts(forecasts) {
     sum.gustSpeed += (f.wind.gust || 0);
 
     const angleRad = (f.wind.deg || 0) * Math.PI / 180;
-    windX += Math.cos(angleRad);
-    windY += Math.sin(angleRad);
+    sum.windDegX += Math.cos(angleRad);
+    sum.windDegY += Math.sin(angleRad);
 
     sum.windSpeed += f.wind.speed;
   });
@@ -177,7 +182,7 @@ function averageForecasts(forecasts) {
   const avgGustSpeed = sum.gustSpeed / count;
   const avgWindSpeed = sum.windSpeed / count;
 
-  const avgWindDir = (Math.atan2(windY / count, windX / count) * 180 / Math.PI + 360) % 360;
+  const avgWindDir = (Math.atan2(sum.windDegY / count, sum.windDegX / count) * 180 / Math.PI + 360) % 360;
   const avgDewPoint = estimateDewPoint(avgTemp, avgHumidity);
   const avgCloudBase = estimateCloudBase(avgTemp, avgDewPoint);
 
@@ -227,8 +232,8 @@ async function checkFlight() {
     const pressure = avg.avgPressure.toFixed(0);
     const visibility = avg.avgVisibility;
     const visibilityStr = formatVisibility(visibility);
-    const windSpeedKts = (avg.avgWindSpeed * 1.94384).toFixed(1);
-    const gustSpeedKts = (avg.avgGustSpeed * 1.94384).toFixed(1);
+    const windSpeedKts = (avg.avgWindSpeed * 1.94384);
+    const gustSpeedKts = (avg.avgGustSpeed * 1.94384);
     const windDir = avg.avgWindDir.toFixed(0);
     const cloudCover = avg.avgCloudCover.toFixed(0);
     const cloudBase = avg.avgCloudBase;
@@ -238,7 +243,6 @@ async function checkFlight() {
     const runway = predictRunway(avg.avgWindDir);
 
     // Wind shear check using surface wind and forecast upper wind (e.g. 850 hPa)
-    // For simplicity, use current weather data for surface wind if available
     let windShearDetected = false;
 
     // Get current weather for surface wind
@@ -255,7 +259,7 @@ async function checkFlight() {
     }
 
     // Check limits & warnings
-    const limitsCheck = checkLimits(parseFloat(windSpeedKts), parseFloat(gustSpeedKts), visibility, flightForecasts[0].weather[0].description, cloudCover, cloudBase);
+    const limitsCheck = checkLimits(parseFloat(windSpeedKts.toFixed(1)), parseFloat(gustSpeedKts.toFixed(1)), visibility, flightForecasts[0].weather[0].description, cloudCover, cloudBase);
 
     let output = "";
     output += `Flight time: ${formatDateUK(startDate)} to ${formatDateUK(endDate)}\n\n`;
@@ -263,16 +267,19 @@ async function checkFlight() {
     output += `Humidity: ${humidity} %\n`;
     output += `Pressure: ${pressure} hPa\n`;
     output += `Visibility: ${visibilityStr}\n`;
-    output += `Wind: ${windSpeedKts} kt @ ${windDir}°\n`;
-    output += `Gusts: ${gustSpeedKts} kt\n`;
+    output += `Wind: ${windSpeedKts.toFixed(1)} kt @ ${windDir}°\n`;
+    output += `Gusts: ${gustSpeedKts.toFixed(1)} kt\n`;
     output += `Cloud cover: ${cloudCover} %\n`;
     output += `Estimated cloud base: ${cloudBase} ft AGL\n`;
     output += `Dew point: ${dewPoint} °C\n\n`;
 
     output += `Icing risk: <span class="${icingRisk.className}">${icingRisk.risk}</span>\n`;
     output += `Turbulence risk: <span class="${turbulence.className}">${turbulence.risk}</span>\n`;
-    output += `Suggested runway: ${runway}\n`;
-    output += `Wind shear: ${windShearDetected ? '<span class="highlight-red">Possible wind shear detected</span>' : '<span class="ok">None detected</span>'}\n\n`;
+
+    const windShearStatus = getWindShearStatus(windShearDetected);
+    output += `Wind shear: <span class="${windShearStatus.className}">${windShearStatus.risk}</span>\n`;
+
+    output += `Suggested runway: ${runway}\n\n`;
 
     if (!limitsCheck.safe) {
       output += `<span class="highlight-red">WARNING: ${limitsCheck.msg}</span>\n`;
